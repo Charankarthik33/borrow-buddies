@@ -24,7 +24,7 @@ export default function LoginPage() {
 
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { data: session, isPending } = useSession();
+  const { data: session, isPending, refetch } = useSession();
 
   useEffect(() => {
     if (!isPending && session?.user) {
@@ -79,6 +79,14 @@ export default function LoginPage() {
         return;
       }
 
+      // Store bearer token if provided
+      if (data?.token) {
+        localStorage.setItem("bearer_token", data.token);
+      }
+
+      // Refresh session to update auth state
+      await refetch();
+      
       toast.success("Welcome back! You have been logged in successfully.");
       router.push("/");
     } catch (error) {

@@ -38,7 +38,7 @@ interface PasswordValidation {
 export default function RegisterPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { data: session, isPending } = useSession();
+  const { data: session, isPending, refetch } = useSession();
   
   const [formData, setFormData] = useState<FormData>({
     name: "",
@@ -62,7 +62,7 @@ export default function RegisterPage() {
   // Redirect if already authenticated
   useEffect(() => {
     if (!isPending && session?.user) {
-      router.push("/dashboard");
+      router.push("/");
     }
   }, [session, isPending, router]);
 
@@ -158,7 +158,7 @@ export default function RegisterPage() {
     setIsLoading(true);
 
     try {
-      const { error } = await authClient.signUp.email({
+      const { data, error } = await authClient.signUp.email({
         email: formData.email,
         password: formData.password,
         name: formData.name,
@@ -174,6 +174,14 @@ export default function RegisterPage() {
         toast.error(errorMap[error.code] || "Registration failed. Please try again.");
         return;
       }
+
+      // Store bearer token if provided
+      if (data?.token) {
+        localStorage.setItem("bearer_token", data.token);
+      }
+
+      // Refresh session to update auth state
+      await refetch();
 
       toast.success("Account created successfully! Please check your email to verify your account.");
       router.push("/login?registered=true");

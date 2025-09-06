@@ -5,6 +5,7 @@ import { useSession } from "@/lib/auth-client";
 import { useRouter } from "next/navigation";
 import NavBar from "@/components/NavBar";
 import AuthSection from "@/components/AuthSection";
+import { HomeFeed } from "@/components/HomeFeed";
 import SocialFeed from "@/components/SocialFeed";
 import ListingsAndBooking from "@/components/ListingsAndBooking";
 import CommunicationPanel from "@/components/CommunicationPanel";
@@ -65,7 +66,7 @@ export default function HomePage() {
   const renderMainContent = () => {
     switch (activeSection) {
       case "home":
-        return <SocialFeed />;
+        return <HomeFeed />;
       case "search":
       case "bookings":
         return <ListingsAndBooking />;
@@ -108,7 +109,7 @@ export default function HomePage() {
       case "auth":
         return <AuthSection />;
       default:
-        return <SocialFeed />;
+        return <HomeFeed />;
     }
   };
 
@@ -128,7 +129,41 @@ export default function HomePage() {
         {/* Left Sidebar - Contextual Filters/Discovery */}
         <div className="hidden lg:block w-80 border-r border-border bg-card/50">
           <div className="sticky top-16 p-4 space-y-4">
-            {(activeSection === "social" || activeSection === "home") && (
+            {activeSection === "home" && session?.user && (
+              <div className="space-y-4">
+                <div>
+                  <h3 className="font-semibold mb-3">Your Interests</h3>
+                  <div className="space-y-2">
+                    {mockUserProfile.interests.map((interest) => (
+                      <div key={interest} className="flex items-center justify-between p-2 rounded hover:bg-accent cursor-pointer">
+                        <span className="text-sm">{interest}</span>
+                        <span className="text-xs text-muted-foreground">Follow</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                
+                <div>
+                  <h3 className="font-semibold mb-3">Recent Activity</h3>
+                  <div className="space-y-3 text-sm">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                      <span>New booking confirmed</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                      <span>3 new messages</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
+                      <span>Profile viewed 12 times</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeSection === "social" && (
               <div className="space-y-4">
                 <div>
                   <h3 className="font-semibold mb-3">Trending Topics</h3>
@@ -143,7 +178,7 @@ export default function HomePage() {
                 </div>
                 
                 <div>
-                  <h3 className="font-semibold mb-3">Suggested Users</h3>
+                  <h3 className="font-semibold mb-3">Discover People</h3>
                   <div className="space-y-3">
                     {[
                       { name: "Alex Chen", username: "alexchen_photo", avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=40&h=40&fit=crop" },
@@ -250,6 +285,47 @@ export default function HomePage() {
                   >
                     Create Account
                   </button>
+                </div>
+              </div>
+            )}
+
+            {/* Context-specific sidebar content */}
+            {activeSection === "home" && session?.user && (
+              <div className="bg-card rounded-lg p-4 border">
+                <h3 className="font-semibold mb-3">Quick Stats</h3>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">Profile Views</span>
+                    <span className="text-sm font-medium">24 this week</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">Active Bookings</span>
+                    <span className="text-sm font-medium">3</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">Total Earnings</span>
+                    <span className="text-sm font-medium">$1,250</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeSection === "social" && (
+              <div className="bg-card rounded-lg p-4 border">
+                <h3 className="font-semibold mb-3">Community Activity</h3>
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-2 h-2 bg-primary rounded-full"></div>
+                    <span className="text-sm">128 new posts today</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                    <span className="text-sm">45 active users</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                    <span className="text-sm">12 events this week</span>
+                  </div>
                 </div>
               </div>
             )}

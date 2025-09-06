@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
+import { useSession } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -25,7 +26,16 @@ import {
   CalendarX,
   Wallet,
   CreditCard,
-  Component
+  Component,
+  Search,
+  Filter,
+  UserCheck,
+  UserX,
+  Clock,
+  CheckCircle,
+  XCircle,
+  AlertCircle,
+  Loader2
 } from "lucide-react";
 
 interface Listing {
@@ -59,10 +69,13 @@ interface Booking {
   listingId: string;
   listingTitle: string;
   guestName: string;
+  hostName: string;
   dates: string;
-  status: "pending" | "confirmed" | "rejected" | "completed";
+  status: "pending" | "confirmed" | "rejected" | "completed" | "cancelled";
   amount: number;
   message: string;
+  createdAt: string;
+  isHost: boolean; // true if current user is the host, false if guest
 }
 
 interface Review {
@@ -140,20 +153,52 @@ const mockBookings: Booking[] = [
     listingId: "1",
     listingTitle: "Professional Photography Companion",
     guestName: "Emma Wilson",
+    hostName: "Alex Chen",
     dates: "Dec 15-16, 2024",
     status: "pending",
     amount: 170,
-    message: "Need photographer for wedding rehearsal dinner"
+    message: "Need photographer for wedding rehearsal dinner",
+    createdAt: "2024-12-12",
+    isHost: false
   },
   {
-    id: "b2",
+    id: "b2", 
     listingId: "2",
     listingTitle: "Vintage Film Camera Collection",
     guestName: "Mike Johnson",
+    hostName: "Sarah Kim",
     dates: "Dec 20-22, 2024",
     status: "confirmed",
     amount: 135,
-    message: "Weekend photography project"
+    message: "Weekend photography project",
+    createdAt: "2024-12-10",
+    isHost: false
+  },
+  {
+    id: "b3",
+    listingId: "1", 
+    listingTitle: "Professional Photography Companion",
+    guestName: "John Smith",
+    hostName: "Alex Chen",
+    dates: "Dec 8-9, 2024",
+    status: "rejected",
+    amount: 170,
+    message: "Corporate headshots needed",
+    createdAt: "2024-12-05",
+    isHost: false
+  },
+  {
+    id: "b4",
+    listingId: "2",
+    listingTitle: "Vintage Film Camera Collection", 
+    guestName: "Lisa Brown",
+    hostName: "Current User",
+    dates: "Dec 25-27, 2024",
+    status: "confirmed",
+    amount: 135,
+    message: "Holiday family photos",
+    createdAt: "2024-12-11",
+    isHost: true
   }
 ];
 
@@ -170,35 +215,157 @@ const mockReviews: Review[] = [
 ];
 
 export default function ListingsAndBooking() {
-  const [activeView, setActiveView] = useState<"listings" | "host">("listings");
+  const { data: session } = useSession();
+  const [activeView, setActiveView] = useState<"listings" | "bookings" | "host">("listings");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
   const [showBookingFlow, setShowBookingFlow] = useState(false);
   const [bookingStep, setBookingStep] = useState(1);
   const [showWallet, setShowWallet] = useState(false);
   const [showCreateListing, setShowCreateListing] = useState(false);
+  const [loading, setLoading] = useState(false);
   
-  // Filter states
+  // Search state
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
+  
+  // Enhanced filter states
   const [filters, setFilters] = useState({
     type: "all",
-    category: "all",
+    category: "all", 
     priceRange: [0, 200],
     location: "",
     availability: "all"
   });
 
-  // Booking flow state
-  const [bookingData, setBookingData] = useState({
-    dates: { from: undefined, to: undefined },
-    message: "",
-    extras: [],
-    paymentMethod: "card",
-    amount: 0
+  // Booking filters state
+  const [bookingFilters, setBookingFilters] = useState({
+    status: "all", // all, pending, confirmed, rejected, completed, cancelled
+    bookingType: "all", // all, sent (bookings I made), received (bookings I received)
+    dateRange: "all", // all, upcoming, past, this_month
+    hostName: "",
+    searchQuery: ""
   });
 
-  // Host tools state
-  const [bookings] = useState<Booking[]>(mockBookings);
+  // Data states
+  const [listings, setListings] = useState<Listing[]>(mockListings);
+  const [bookings, setBookings] = useState<Booking[]>(mockBookings);
   const [walletBalance] = useState(1247.50);
+
+  // Fetch data from APIs
+  useEffect(() => {
+    if (activeView === "listings") {
+      fetchListings();
+    } else if (activeView === "bookings") {
+      fetchBookings();
+    }
+  }, [activeView]);
+
+  const fetchListings = useCallback(async () => {
+    try {
+      setLoading(true);
+      const token = localStorage.getItem('bearer_token');
+      const response = await fetch('/api/posts?postType=service&postType=listing', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        // Transform API data to listings format
+        const transformedListings = data.map((post: any) => ({
+          id: post.id.toString(),
+          title: post.content.split('\n')[0] || 'Untitled',
+          type: post.isListing ? "item" : "companion",
+          price: post.price || 0,
+          description: post.content,
+          shortDescription: post.content.substring(0, 100) + '...',
+          rating: 4.5, // Default rating
+          reviewCount: 0,
+          location: post.location || 'Location not specified',
+          category: post.serviceCategory || 'Other',
+          availability: "available",
+          images: post.media ? JSON.parse(post.media).map((m: any) => m.url) : [],
+          host: {
+            id: post.userId.toString(),
+            name: 'Host Name', // TODO: Get from user data
+            avatar: '',
+            rating: 4.5,
+            responseTime: 'within 2 hours'
+          },
+          amenities: post.tags ? JSON.parse(post.tags) : [],
+          rules: [],
+          minimumDuration: 1,
+          maximumDuration: 7
+        }));
+        setListings([...transformedListings, ...mockListings]);
+      }
+    } catch (error) {
+      console.error('Error fetching listings:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const fetchBookings = useCallback(async () => {
+    try {
+      setLoading(true);
+      const token = localStorage.getItem('bearer_token');
+      const response = await fetch('/api/bookings', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        // Transform API data to bookings format
+        const transformedBookings = data.map((booking: any) => ({
+          id: booking.id.toString(),
+          listingId: booking.listingId?.toString() || '',
+          listingTitle: booking.listingTitle || 'Unknown Listing',
+          guestName: booking.guestName || 'Unknown Guest', 
+          hostName: booking.hostName || 'Unknown Host',
+          dates: booking.checkIn && booking.checkOut ? 
+            `${new Date(booking.checkIn).toLocaleDateString()} - ${new Date(booking.checkOut).toLocaleDateString()}` : 
+            'Dates not specified',
+          status: booking.status,
+          amount: booking.totalAmount || 0,
+          message: booking.specialRequests || '',
+          createdAt: booking.createdAt,
+          isHost: booking.isHost || false
+        }));
+        setBookings([...transformedBookings, ...mockBookings]);
+      }
+    } catch (error) {
+      console.error('Error fetching bookings:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const handleSearch = useCallback(async () => {
+    if (!searchQuery.trim()) return;
+    
+    setIsSearching(true);
+    try {
+      if (activeView === "listings") {
+        // Search listings
+        const filteredListings = mockListings.filter(listing =>
+          listing.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          listing.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          listing.location.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          listing.category.toLowerCase().includes(searchQuery.toLowerCase())
+        );
+        setListings(filteredListings);
+      } else if (activeView === "bookings") {
+        // Update booking search filter
+        setBookingFilters(prev => ({...prev, searchQuery}));
+      }
+      toast.success(`Search completed for "${searchQuery}"`);
+    } catch (error) {
+      toast.error("Search failed. Please try again.");
+    } finally {
+      setIsSearching(false);
+    }
+  }, [searchQuery, activeView]);
 
   const handleBookingRequest = useCallback(() => {
     toast.success("Booking request sent successfully!");
@@ -210,7 +377,21 @@ export default function ListingsAndBooking() {
     toast.success(`Booking ${action}ed successfully`);
   }, []);
 
-  const filteredListings = mockListings.filter(listing => {
+  // Enhanced booking filtering
+  const filteredBookings = bookings.filter(booking => {
+    if (bookingFilters.status !== "all" && booking.status !== bookingFilters.status) return false;
+    if (bookingFilters.bookingType === "sent" && booking.isHost) return false;
+    if (bookingFilters.bookingType === "received" && !booking.isHost) return false;
+    if (bookingFilters.hostName && !booking.hostName.toLowerCase().includes(bookingFilters.hostName.toLowerCase())) return false;
+    if (bookingFilters.searchQuery && !(
+      booking.listingTitle.toLowerCase().includes(bookingFilters.searchQuery.toLowerCase()) ||
+      booking.guestName.toLowerCase().includes(bookingFilters.searchQuery.toLowerCase()) ||
+      booking.hostName.toLowerCase().includes(bookingFilters.searchQuery.toLowerCase())
+    )) return false;
+    return true;
+  });
+
+  const filteredListings = listings.filter(listing => {
     if (filters.type !== "all" && listing.type !== filters.type) return false;
     if (filters.category !== "all" && listing.category !== filters.category) return false;
     if (listing.price < filters.priceRange[0] || listing.price > filters.priceRange[1]) return false;
@@ -219,11 +400,35 @@ export default function ListingsAndBooking() {
     return true;
   });
 
+  const getBookingStatusIcon = (status: string) => {
+    switch (status) {
+      case "confirmed": return <CheckCircle className="h-4 w-4 text-green-600" />;
+      case "pending": return <Clock className="h-4 w-4 text-yellow-600" />;
+      case "rejected": return <XCircle className="h-4 w-4 text-red-600" />;
+      case "completed": return <CheckCircle className="h-4 w-4 text-blue-600" />;
+      case "cancelled": return <AlertCircle className="h-4 w-4 text-gray-600" />;
+      default: return <Clock className="h-4 w-4 text-gray-600" />;
+    }
+  };
+
+  const getBookingStatusStats = () => {
+    const stats = {
+      total: bookings.length,
+      pending: bookings.filter(b => b.status === "pending").length,
+      confirmed: bookings.filter(b => b.status === "confirmed").length, 
+      rejected: bookings.filter(b => b.status === "rejected").length,
+      completed: bookings.filter(b => b.status === "completed").length,
+      sent: bookings.filter(b => !b.isHost).length,
+      received: bookings.filter(b => b.isHost).length
+    };
+    return stats;
+  };
+
   const ListingCard = ({ listing }: { listing: Listing }) => (
     <Card className="group cursor-pointer transition-all hover:shadow-lg" onClick={() => setSelectedListing(listing)}>
       <div className="aspect-video overflow-hidden rounded-t-lg">
         <img
-          src={listing.images[0]}
+          src={listing.images[0] || "https://images.unsplash.com/photo-1560472354-b33ff0c44a43?w=400&h=300&fit=crop"}
           alt={listing.title}
           className="h-full w-full object-cover transition-transform group-hover:scale-105"
         />
@@ -605,31 +810,159 @@ export default function ListingsAndBooking() {
     </Dialog>
   );
 
+  const BookingFilters = () => (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Filter className="w-5 h-5" />
+          Booking Filters
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div>
+          <Label>Status</Label>
+          <Select value={bookingFilters.status} onValueChange={(value) => setBookingFilters({...bookingFilters, status: value})}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Statuses</SelectItem>
+              <SelectItem value="pending">Pending</SelectItem>
+              <SelectItem value="confirmed">Confirmed</SelectItem>
+              <SelectItem value="rejected">Rejected</SelectItem>
+              <SelectItem value="completed">Completed</SelectItem>
+              <SelectItem value="cancelled">Cancelled</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div>
+          <Label>Booking Type</Label>
+          <Select value={bookingFilters.bookingType} onValueChange={(value) => setBookingFilters({...bookingFilters, bookingType: value})}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Bookings</SelectItem>
+              <SelectItem value="sent">
+                <div className="flex items-center gap-2">
+                  <UserCheck className="h-4 w-4" />
+                  Who You Booked
+                </div>
+              </SelectItem>
+              <SelectItem value="received">
+                <div className="flex items-center gap-2">
+                  <UserX className="h-4 w-4" />
+                  Who Booked You
+                </div>
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div>
+          <Label>Host/Guest Name</Label>
+          <Input
+            placeholder="Search by name..."
+            value={bookingFilters.hostName}
+            onChange={(e) => setBookingFilters({...bookingFilters, hostName: e.target.value})}
+          />
+        </div>
+
+        <div>
+          <Label>Date Range</Label>
+          <Select value={bookingFilters.dateRange} onValueChange={(value) => setBookingFilters({...bookingFilters, dateRange: value})}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Time</SelectItem>
+              <SelectItem value="upcoming">Upcoming</SelectItem>
+              <SelectItem value="past">Past</SelectItem>
+              <SelectItem value="this_month">This Month</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <Button 
+          variant="outline" 
+          className="w-full"
+          onClick={() => setBookingFilters({
+            status: "all",
+            bookingType: "all", 
+            dateRange: "all",
+            hostName: "",
+            searchQuery: ""
+          })}
+        >
+          Clear Filters
+        </Button>
+      </CardContent>
+    </Card>
+  );
+
   return (
     <div className="min-h-screen bg-background">
       <div className="container mx-auto px-4 py-6">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-4">
-            <h1 className="text-3xl font-bold">Listings & Bookings</h1>
-            <Tabs value={activeView} onValueChange={(value) => setActiveView(value as "listings" | "host")}>
-              <TabsList>
-                <TabsTrigger value="listings">Browse Listings</TabsTrigger>
-                <TabsTrigger value="host">Host Tools</TabsTrigger>
-              </TabsList>
-            </Tabs>
-          </div>
-          
-          <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => setShowWallet(true)}>
-              <Wallet className="w-4 h-4 mr-2" />
-              Wallet
-            </Button>
-            {activeView === "host" && (
-              <Button onClick={() => setShowCreateListing(true)}>
-                Create Listing
+        {/* Header with Primary Search */}
+        <div className="space-y-6 mb-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <h1 className="text-3xl font-bold">Listings & Bookings</h1>
+              <Tabs value={activeView} onValueChange={(value) => setActiveView(value as "listings" | "bookings" | "host")}>
+                <TabsList>
+                  <TabsTrigger value="listings">Browse Listings</TabsTrigger>
+                  <TabsTrigger value="bookings">My Bookings</TabsTrigger>
+                  <TabsTrigger value="host">Host Tools</TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <Button variant="outline" onClick={() => setShowWallet(true)}>
+                <Wallet className="w-4 h-4 mr-2" />
+                Wallet
               </Button>
-            )}
+              {activeView === "host" && (
+                <Button onClick={() => setShowCreateListing(true)}>
+                  Create Listing
+                </Button>
+              )}
+            </div>
           </div>
+
+          {/* Primary Search Bar */}
+          <Card className="p-4">
+            <div className="flex gap-4">
+              <div className="flex-1">
+                <Input
+                  placeholder={
+                    activeView === "listings" 
+                      ? "Search listings, locations, categories..." 
+                      : activeView === "bookings"
+                      ? "Search bookings, hosts, guests..."
+                      : "Search your listings..."
+                  }
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+                  className="text-base"
+                />
+              </div>
+              <Button 
+                onClick={handleSearch}
+                disabled={isSearching || !searchQuery.trim()}
+                className="px-8"
+              >
+                {isSearching ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Search className="w-4 h-4 mr-2" />
+                )}
+                Search
+              </Button>
+            </div>
+          </Card>
         </div>
 
         {activeView === "listings" && (
@@ -740,10 +1073,169 @@ export default function ListingsAndBooking() {
                 </div>
               </div>
 
-              <div className={viewMode === "grid" ? "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4" : "space-y-4"}>
-                {filteredListings.map((listing) => (
-                  <ListingCard key={listing.id} listing={listing} />
-                ))}
+              {loading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-8 w-8 animate-spin" />
+                  <span className="ml-2">Loading listings...</span>
+                </div>
+              ) : (
+                <div className={viewMode === "grid" ? "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4" : "space-y-4"}>
+                  {filteredListings.map((listing) => (
+                    <ListingCard key={listing.id} listing={listing} />
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeView === "bookings" && (
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            {/* Booking Filters Sidebar */}
+            <div className="lg:col-span-1 space-y-4">
+              <BookingFilters />
+              
+              {/* Booking Stats */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Booking Stats</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {(() => {
+                    const stats = getBookingStatusStats();
+                    return (
+                      <>
+                        <div className="flex justify-between">
+                          <span className="text-sm">Total Bookings</span>
+                          <span className="font-medium">{stats.total}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm">Pending</span>
+                          <span className="font-medium text-yellow-600">{stats.pending}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm">Confirmed</span>
+                          <span className="font-medium text-green-600">{stats.confirmed}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm">Rejected</span>
+                          <span className="font-medium text-red-600">{stats.rejected}</span>
+                        </div>
+                        <Separator />
+                        <div className="flex justify-between">
+                          <span className="text-sm">You Booked</span>
+                          <span className="font-medium">{stats.sent}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm">Booked You</span>
+                          <span className="font-medium">{stats.received}</span>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Bookings List */}
+            <div className="lg:col-span-3">
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground">
+                    {filteredBookings.length} bookings found
+                  </span>
+                </div>
+
+                {loading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-8 w-8 animate-spin" />
+                    <span className="ml-2">Loading bookings...</span>
+                  </div>
+                ) : filteredBookings.length === 0 ? (
+                  <Card className="p-8 text-center">
+                    <CalendarX className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                    <h3 className="text-lg font-semibold mb-2">No bookings found</h3>
+                    <p className="text-muted-foreground">
+                      {bookingFilters.status === "all" && bookingFilters.bookingType === "all"
+                        ? "You don't have any bookings yet. Start by browsing listings!"
+                        : "No bookings match your current filters. Try adjusting your search criteria."
+                      }
+                    </p>
+                  </Card>
+                ) : (
+                  <div className="space-y-4">
+                    {filteredBookings.map((booking) => (
+                      <Card key={booking.id}>
+                        <CardContent className="p-6">
+                          <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-3">
+                              {getBookingStatusIcon(booking.status)}
+                              <div>
+                                <h3 className="font-semibold">{booking.listingTitle}</h3>
+                                <p className="text-sm text-muted-foreground">
+                                  {booking.isHost ? `Guest: ${booking.guestName}` : `Host: ${booking.hostName}`}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <Badge variant={
+                                booking.status === "confirmed" ? "default" :
+                                booking.status === "pending" ? "secondary" :
+                                booking.status === "completed" ? "outline" : "destructive"
+                              }>
+                                {booking.status}
+                              </Badge>
+                              <p className="text-sm text-muted-foreground mt-1">
+                                {booking.isHost ? "As Host" : "As Guest"}
+                              </p>
+                            </div>
+                          </div>
+                          
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                            <div>
+                              <p className="text-muted-foreground">Dates</p>
+                              <p className="font-medium">{booking.dates}</p>
+                            </div>
+                            <div>
+                              <p className="text-muted-foreground">Amount</p>
+                              <p className="font-medium">${booking.amount}</p>
+                            </div>
+                            <div>
+                              <p className="text-muted-foreground">Booked</p>
+                              <p className="font-medium">{new Date(booking.createdAt).toLocaleDateString()}</p>
+                            </div>
+                            <div>
+                              <p className="text-muted-foreground">Actions</p>
+                              <div className="flex gap-1">
+                                {booking.status === "pending" && booking.isHost && (
+                                  <>
+                                    <Button size="sm" onClick={() => handleBookingAction(booking.id, "accept")}>
+                                      Accept
+                                    </Button>
+                                    <Button size="sm" variant="outline" onClick={() => handleBookingAction(booking.id, "reject")}>
+                                      Reject
+                                    </Button>
+                                  </>
+                                )}
+                                {booking.status === "confirmed" && (
+                                  <Button size="sm" variant="outline">
+                                    Contact
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          
+                          {booking.message && (
+                            <div className="mt-4 p-3 bg-muted rounded-lg">
+                              <p className="text-sm"><strong>Message:</strong> {booking.message}</p>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -800,7 +1292,7 @@ export default function ListingsAndBooking() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {bookings.map((booking) => (
+                    {bookings.filter(b => b.isHost).map((booking) => (
                       <TableRow key={booking.id}>
                         <TableCell className="font-medium">{booking.guestName}</TableCell>
                         <TableCell>{booking.listingTitle}</TableCell>

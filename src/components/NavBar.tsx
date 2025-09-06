@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { authClient } from "@/lib/auth-client";
+import { authClient, useSession } from "@/lib/auth-client";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -81,6 +81,7 @@ export default function NavBar({ activeItem = "home", onNavigate, className, use
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const router = useRouter();
+  const { refetch } = useSession();
 
   // Initialize theme from localStorage
   useEffect(() => {
@@ -141,10 +142,10 @@ export default function NavBar({ activeItem = "home", onNavigate, className, use
         toast.error("Failed to sign out. Please try again.");
       } else {
         localStorage.removeItem("bearer_token");
+        // Refresh session state instead of full page reload
+        await refetch();
         toast.success("Successfully signed out!");
         router.push("/");
-        // Force refresh to update auth state
-        window.location.reload();
       }
     } catch (error) {
       toast.error("An error occurred while signing out.");

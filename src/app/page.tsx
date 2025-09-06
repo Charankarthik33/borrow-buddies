@@ -1,6 +1,8 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { useSession } from "@/lib/auth-client";
+import { useRouter } from "next/navigation";
 import NavBar from "@/components/NavBar";
 import AuthSection from "@/components/AuthSection";
 import SocialFeed from "@/components/SocialFeed";
@@ -11,15 +13,16 @@ import UserProfile from "@/components/UserProfile";
 
 export default function HomePage() {
   const [activeSection, setActiveSection] = useState<string>("home");
-  const [user, setUser] = useState(null);
+  const { data: session, isPending } = useSession();
+  const router = useRouter();
 
-  // Mock user profile data for demonstration
+  // Mock user profile data for demonstration - this will be replaced with real user data
   const mockUserProfile = {
-    id: "current-user",
-    username: "your_username",
-    displayName: "Your Name",
-    email: "you@example.com",
-    avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop&crop=face",
+    id: session?.user?.id || "current-user",
+    username: session?.user?.email?.split('@')[0] || "your_username", 
+    displayName: session?.user?.name || "Your Name",
+    email: session?.user?.email || "you@example.com",
+    avatar: session?.user?.image || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&h=150&fit=crop&crop=face",
     coverImage: "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800&h=300&fit=crop",
     bio: "Welcome to my profile! I love connecting with new people and exploring amazing experiences.",
     location: "San Francisco, CA",
@@ -36,8 +39,28 @@ export default function HomePage() {
   };
 
   const handleNavigation = (sectionId: string) => {
+    // Check if user needs to be authenticated for certain sections
+    if (!session?.user && ["messages", "profile", "admin"].includes(sectionId)) {
+      router.push("/login");
+      return;
+    }
+    
     setActiveSection(sectionId);
   };
+
+  // Show loading state while checking authentication
+  if (isPending) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  // If user is not authenticated and trying to access auth section, show AuthSection
+  if (!session?.user && activeSection === "auth") {
+    return <AuthSection />;
+  }
 
   const renderMainContent = () => {
     switch (activeSection) {
@@ -49,12 +72,20 @@ export default function HomePage() {
       case "social":
         return <SocialFeed />;
       case "messages":
+        if (!session?.user) {
+          router.push("/login");
+          return null;
+        }
         return (
           <div className="max-w-6xl mx-auto h-[calc(100vh-80px)]">
             <CommunicationPanel />
           </div>
         );
       case "profile":
+        if (!session?.user) {
+          router.push("/login");
+          return null;
+        }
         return (
           <div className="container mx-auto px-4 py-6">
             <UserProfile 
@@ -69,6 +100,10 @@ export default function HomePage() {
           </div>
         );
       case "admin":
+        if (!session?.user) {
+          router.push("/login");
+          return null;
+        }
         return <AdminDashboard />;
       case "auth":
         return <AuthSection />;
@@ -84,6 +119,7 @@ export default function HomePage() {
         <NavBar 
           activeItem={activeSection} 
           onNavigate={handleNavigation}
+          user={session?.user || null}
         />
       </div>
 
@@ -162,79 +198,109 @@ export default function HomePage() {
         {/* Right Sidebar - User Widgets */}
         <div className="hidden lg:block w-80 border-l border-border bg-card/50">
           <div className="sticky top-16 p-4 space-y-4">
-            {/* Mini User Profile */}
-            <div className="bg-card rounded-lg p-4 border">
-              <div className="flex items-center gap-3 mb-3">
-                <img 
-                  src={mockUserProfile.avatar} 
-                  alt="Your avatar" 
-                  className="w-12 h-12 rounded-full"
-                />
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium truncate">{mockUserProfile.displayName}</p>
-                  <p className="text-sm text-muted-foreground">Trust Score: {mockUserProfile.trustScore}%</p>
+            {/* Mini User Profile - Only show if authenticated */}
+            {session?.user && (
+              <div className="bg-card rounded-lg p-4 border">
+                <div className="flex items-center gap-3 mb-3">
+                  <img 
+                    src={session.user.image || mockUserProfile.avatar} 
+                    alt="Your avatar" 
+                    className="w-12 h-12 rounded-full"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium truncate">{session.user.name || mockUserProfile.displayName}</p>
+                    <p className="text-sm text-muted-foreground">Trust Score: {mockUserProfile.trustScore}%</p>
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-3 gap-4 text-center text-sm">
+                  <div>
+                    <div className="font-medium">{mockUserProfile.followersCount}</div>
+                    <div className="text-muted-foreground">Followers</div>
+                  </div>
+                  <div>
+                    <div className="font-medium">{mockUserProfile.followingCount}</div>
+                    <div className="text-muted-foreground">Following</div>
+                  </div>
+                  <div>
+                    <div className="font-medium">12</div>
+                    <div className="text-muted-foreground">Posts</div>
+                  </div>
                 </div>
               </div>
-              
-              <div className="grid grid-cols-3 gap-4 text-center text-sm">
-                <div>
-                  <div className="font-medium">{mockUserProfile.followersCount}</div>
-                  <div className="text-muted-foreground">Followers</div>
-                </div>
-                <div>
-                  <div className="font-medium">{mockUserProfile.followingCount}</div>
-                  <div className="text-muted-foreground">Following</div>
-                </div>
-                <div>
-                  <div className="font-medium">12</div>
-                  <div className="text-muted-foreground">Posts</div>
-                </div>
-              </div>
-            </div>
+            )}
 
-            {/* Communication Panel Summary */}
-            <div className="bg-card rounded-lg p-4 border">
-              <h3 className="font-semibold mb-3">Recent Activity</h3>
-              <div className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-2 h-2 bg-primary rounded-full"></div>
-                  <span className="text-sm">2 new messages</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="w-2 h-2 bg-yellow-500 rounded-full"></div>
-                  <span className="text-sm">1 booking request</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                  <span className="text-sm">Payment received</span>
+            {/* Login prompt for guests */}
+            {!session?.user && (
+              <div className="bg-card rounded-lg p-4 border">
+                <h3 className="font-semibold mb-2">Join Rent My Life</h3>
+                <p className="text-sm text-muted-foreground mb-3">
+                  Connect with people, offer your services, and discover amazing experiences.
+                </p>
+                <div className="space-y-2">
+                  <button 
+                    onClick={() => router.push("/login")}
+                    className="w-full text-left p-2 rounded bg-primary text-primary-foreground hover:bg-primary/90 text-sm font-medium text-center"
+                  >
+                    Sign In
+                  </button>
+                  <button 
+                    onClick={() => router.push("/register")}
+                    className="w-full text-left p-2 rounded border hover:bg-accent text-sm text-center"
+                  >
+                    Create Account
+                  </button>
                 </div>
               </div>
-            </div>
+            )}
 
-            {/* Quick Actions */}
-            <div className="bg-card rounded-lg p-4 border">
-              <h3 className="font-semibold mb-3">Quick Actions</h3>
-              <div className="space-y-2">
-                <button 
-                  onClick={() => handleNavigation("messages")}
-                  className="w-full text-left p-2 rounded hover:bg-accent text-sm"
-                >
-                  📨 Check Messages
-                </button>
-                <button 
-                  onClick={() => handleNavigation("bookings")}
-                  className="w-full text-left p-2 rounded hover:bg-accent text-sm"
-                >
-                  📅 View Bookings
-                </button>
-                <button 
-                  onClick={() => handleNavigation("profile")}
-                  className="w-full text-left p-2 rounded hover:bg-accent text-sm"
-                >
-                  👤 Edit Profile
-                </button>
+            {/* Communication Panel Summary - Only for authenticated users */}
+            {session?.user && (
+              <div className="bg-card rounded-lg p-4 border">
+                <h3 className="font-semibold mb-3">Recent Activity</h3>
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-2 h-2 bg-primary rounded-full"></div>
+                    <span className="text-sm">2 new messages</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="w-2 h-2 bg-yellow-500 rounded-full"></div>
+                    <span className="text-sm">1 booking request</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                    <span className="text-sm">Payment received</span>
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
+
+            {/* Quick Actions - Only for authenticated users */}
+            {session?.user && (
+              <div className="bg-card rounded-lg p-4 border">
+                <h3 className="font-semibold mb-3">Quick Actions</h3>
+                <div className="space-y-2">
+                  <button 
+                    onClick={() => handleNavigation("messages")}
+                    className="w-full text-left p-2 rounded hover:bg-accent text-sm"
+                  >
+                    📨 Check Messages
+                  </button>
+                  <button 
+                    onClick={() => handleNavigation("bookings")}
+                    className="w-full text-left p-2 rounded hover:bg-accent text-sm"
+                  >
+                    📅 View Bookings
+                  </button>
+                  <button 
+                    onClick={() => handleNavigation("profile")}
+                    className="w-full text-left p-2 rounded hover:bg-accent text-sm"
+                  >
+                    👤 Edit Profile
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

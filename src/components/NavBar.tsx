@@ -1,6 +1,9 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { authClient } from "@/lib/auth-client";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -36,6 +39,8 @@ import {
   Menu,
   X,
   Bell,
+  LogIn,
+  UserPlus,
 } from "lucide-react";
 
 interface NavItem {
@@ -44,27 +49,38 @@ interface NavItem {
   icon: React.ComponentType<{ className?: string }>;
   href?: string;
   badgeCount?: number;
+  requiresAuth?: boolean;
+}
+
+interface AuthUser {
+  id: string;
+  name: string;
+  email: string;
+  image?: string;
 }
 
 interface NavBarProps {
   activeItem?: string;
   onNavigate?: (itemId: string) => void;
   className?: string;
+  user?: AuthUser | null;
 }
 
 const navItems: NavItem[] = [
   { id: "home", label: "Home", icon: Home, href: "/" },
   { id: "search", label: "Search", icon: Search, href: "/search" },
   { id: "social", label: "Social", icon: Users, href: "/social" },
-  { id: "bookings", label: "Bookings", icon: Calendar, href: "/bookings", badgeCount: 3 },
-  { id: "messages", label: "Messages", icon: MessageSquare, href: "/messages", badgeCount: 5 },
-  { id: "profile", label: "Profile", icon: User, href: "/profile" },
+  { id: "bookings", label: "Bookings", icon: Calendar, href: "/bookings", badgeCount: 3, requiresAuth: true },
+  { id: "messages", label: "Messages", icon: MessageSquare, href: "/messages", badgeCount: 5, requiresAuth: true },
+  { id: "profile", label: "Profile", icon: User, href: "/profile", requiresAuth: true },
 ];
 
-export default function NavBar({ activeItem = "home", onNavigate, className }: NavBarProps) {
+export default function NavBar({ activeItem = "home", onNavigate, className, user }: NavBarProps) {
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [isCommandOpen, setIsCommandOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const router = useRouter();
 
   // Initialize theme from localStorage
   useEffect(() => {
@@ -103,10 +119,38 @@ export default function NavBar({ activeItem = "home", onNavigate, className }: N
   }, []);
 
   const handleNavItemClick = (itemId: string) => {
+    const item = navItems.find(nav => nav.id === itemId);
+    
+    // Check if item requires authentication
+    if (item?.requiresAuth && !user) {
+      router.push("/login");
+      return;
+    }
+
     if (onNavigate) {
       onNavigate(itemId);
     }
     setIsMobileMenuOpen(false);
+  };
+
+  const handleLogout = async () => {
+    setIsLoggingOut(true);
+    try {
+      const { error } = await authClient.signOut();
+      if (error?.code) {
+        toast.error("Failed to sign out. Please try again.");
+      } else {
+        localStorage.removeItem("bearer_token");
+        toast.success("Successfully signed out!");
+        router.push("/");
+        // Force refresh to update auth state
+        window.location.reload();
+      }
+    } catch (error) {
+      toast.error("An error occurred while signing out.");
+    } finally {
+      setIsLoggingOut(false);
+    }
   };
 
   const NavItemButton = ({ item, isActive, showLabel = true }: { item: NavItem; isActive: boolean; showLabel?: boolean }) => (
@@ -117,13 +161,15 @@ export default function NavBar({ activeItem = "home", onNavigate, className }: N
         relative flex items-center justify-center gap-2 transition-all
         ${showLabel ? "px-4 py-2" : "p-2 w-12 h-12"}
         ${isActive ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}
+        ${item.requiresAuth && !user ? "opacity-60" : ""}
       `}
       onClick={() => handleNavItemClick(item.id)}
       aria-label={item.label}
+      title={item.requiresAuth && !user ? "Sign in required" : item.label}
     >
       <item.icon className={`h-5 w-5 ${showLabel ? "" : "h-6 w-6"}`} />
       {showLabel && <span className="text-sm font-medium">{item.label}</span>}
-      {item.badgeCount && item.badgeCount > 0 && (
+      {item.badgeCount && item.badgeCount > 0 && user && (
         <Badge
           variant="destructive"
           className="absolute -top-1 -right-1 h-5 w-5 rounded-full p-0 text-xs flex items-center justify-center"
@@ -132,6 +178,67 @@ export default function NavBar({ activeItem = "home", onNavigate, className }: N
         </Badge>
       )}
     </Button>
+  );
+
+  const AuthButtons = ({ mobile = false }: { mobile?: boolean }) => (
+    <div className={`flex items-center ${mobile ? "flex-col space-y-2" : "space-x-2"}`}>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => router.push("/login")}
+        className="text-muted-foreground hover:text-foreground"
+      >
+        <LogIn className="h-4 w-4 mr-2" />
+        Sign In
+      </Button>
+      <Button
+        size="sm"
+        onClick={() => router.push("/register")}
+        className="bg-primary text-primary-foreground hover:bg-primary/90"
+      >
+        <UserPlus className="h-4 w-4 mr-2" />
+        Sign Up
+      </Button>
+    </div>
+  );
+
+  const UserProfile = ({ mobile = false }: { mobile?: boolean }) => (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" className={`relative ${mobile ? "p-2 w-12 h-12" : "h-8 w-8"} rounded-full`}>
+          <Avatar className={mobile ? "h-6 w-6" : "h-8 w-8"}>
+            <AvatarImage src={user?.image} alt={user?.name || "Profile"} />
+            <AvatarFallback className={mobile ? "text-xs" : ""}>
+              {user?.name?.split(' ').map(n => n[0]).join('').toUpperCase() || 'U'}
+            </AvatarFallback>
+          </Avatar>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="w-56" align="end" side={mobile ? "top" : "bottom"} forceMount>
+        <div className="flex items-center justify-start gap-2 p-2">
+          <div className="flex flex-col space-y-1 leading-none">
+            <p className="font-medium">{user?.name}</p>
+            <p className="w-[200px] truncate text-sm text-muted-foreground">
+              {user?.email}
+            </p>
+          </div>
+        </div>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => handleNavItemClick("profile")}>
+          <User className="mr-2 h-4 w-4" />
+          <span>Profile</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem>
+          <Settings className="mr-2 h-4 w-4" />
+          <span>Settings</span>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={handleLogout} disabled={isLoggingOut}>
+          <LogOut className="mr-2 h-4 w-4" />
+          <span>{isLoggingOut ? "Signing out..." : "Sign out"}</span>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 
   return (
@@ -147,7 +254,12 @@ export default function NavBar({ activeItem = "home", onNavigate, className }: N
             <div className="flex items-center justify-between h-16">
               {/* Logo/Brand */}
               <div className="flex items-center">
-                <h1 className="text-xl font-bold text-foreground">Rent My Life</h1>
+                <button 
+                  onClick={() => handleNavItemClick("home")}
+                  className="text-xl font-bold text-foreground hover:text-primary transition-colors"
+                >
+                  Rent My Life
+                </button>
               </div>
 
               {/* Main Navigation */}
@@ -201,41 +313,8 @@ export default function NavBar({ activeItem = "home", onNavigate, className }: N
                   <TooltipContent>Toggle theme</TooltipContent>
                 </Tooltip>
 
-                {/* Profile Menu */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" className="relative h-8 w-8 rounded-full">
-                      <Avatar className="h-8 w-8">
-                        <AvatarImage src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=32&h=32&fit=crop&crop=face" alt="Profile" />
-                        <AvatarFallback>JD</AvatarFallback>
-                      </Avatar>
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent className="w-56" align="end" forceMount>
-                    <div className="flex items-center justify-start gap-2 p-2">
-                      <div className="flex flex-col space-y-1 leading-none">
-                        <p className="font-medium">John Doe</p>
-                        <p className="w-[200px] truncate text-sm text-muted-foreground">
-                          john.doe@example.com
-                        </p>
-                      </div>
-                    </div>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => handleNavItemClick("profile")}>
-                      <User className="mr-2 h-4 w-4" />
-                      <span>Profile</span>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem>
-                      <Settings className="mr-2 h-4 w-4" />
-                      <span>Settings</span>
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem>
-                      <LogOut className="mr-2 h-4 w-4" />
-                      <span>Log out</span>
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                {/* Authentication */}
+                {user ? <UserProfile /> : <AuthButtons />}
               </div>
             </div>
           </div>
@@ -245,7 +324,12 @@ export default function NavBar({ activeItem = "home", onNavigate, className }: N
         <div className="md:hidden">
           {/* Top Bar */}
           <div className="flex items-center justify-between h-16 px-4 border-b border-border">
-            <h1 className="text-lg font-bold text-foreground">Rent My Life</h1>
+            <button 
+              onClick={() => handleNavItemClick("home")}
+              className="text-lg font-bold text-foreground hover:text-primary transition-colors"
+            >
+              Rent My Life
+            </button>
             <div className="flex items-center space-x-2">
               <Button
                 variant="ghost"
@@ -285,6 +369,11 @@ export default function NavBar({ activeItem = "home", onNavigate, className }: N
                     isActive={activeItem === item.id}
                   />
                 ))}
+                {!user && (
+                  <div className="pt-4 mt-4 border-t border-border">
+                    <AuthButtons mobile />
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -308,11 +397,12 @@ export default function NavBar({ activeItem = "home", onNavigate, className }: N
                 <Button
                   size="sm"
                   className="rounded-full w-12 h-12 bg-primary text-primary-foreground shadow-lg"
+                  onClick={() => user ? handleNavItemClick("social") : router.push("/login")}
                 >
                   <Plus className="h-6 w-6" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Create</TooltipContent>
+              <TooltipContent>{user ? "Create" : "Sign in to create"}</TooltipContent>
             </Tooltip>
 
             {navItems.slice(2, 4).map((item) => (
@@ -325,31 +415,17 @@ export default function NavBar({ activeItem = "home", onNavigate, className }: N
             ))}
 
             {/* Profile in bottom nav */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="relative p-2 w-12 h-12">
-                  <Avatar className="h-6 w-6">
-                    <AvatarImage src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=24&h=24&fit=crop&crop=face" alt="Profile" />
-                    <AvatarFallback className="text-xs">JD</AvatarFallback>
-                  </Avatar>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent className="w-56" align="end" side="top">
-                <DropdownMenuItem onClick={() => handleNavItemClick("profile")}>
-                  <User className="mr-2 h-4 w-4" />
-                  <span>Profile</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem>
-                  <Settings className="mr-2 h-4 w-4" />
-                  <span>Settings</span>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem>
-                  <LogOut className="mr-2 h-4 w-4" />
-                  <span>Log out</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {user ? (
+              <UserProfile mobile />
+            ) : (
+              <Button
+                variant="ghost"
+                className="p-2 w-12 h-12"
+                onClick={() => router.push("/login")}
+              >
+                <LogIn className="h-6 w-6" />
+              </Button>
+            )}
           </div>
         </div>
 
@@ -372,16 +448,18 @@ export default function NavBar({ activeItem = "home", onNavigate, className }: N
                 </CommandItem>
               ))}
             </CommandGroup>
-            <CommandGroup heading="Quick Actions">
-              <CommandItem>
-                <Plus className="mr-2 h-4 w-4" />
-                <span>Create new post</span>
-              </CommandItem>
-              <CommandItem>
-                <Plus className="mr-2 h-4 w-4" />
-                <span>Create new listing</span>
-              </CommandItem>
-            </CommandGroup>
+            {user && (
+              <CommandGroup heading="Quick Actions">
+                <CommandItem>
+                  <Plus className="mr-2 h-4 w-4" />
+                  <span>Create new post</span>
+                </CommandItem>
+                <CommandItem>
+                  <Plus className="mr-2 h-4 w-4" />
+                  <span>Create new listing</span>
+                </CommandItem>
+              </CommandGroup>
+            )}
           </CommandList>
         </CommandDialog>
       </nav>

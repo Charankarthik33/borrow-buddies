@@ -35,7 +35,15 @@ import {
   CheckCircle,
   XCircle,
   AlertCircle,
-  Loader2
+  Loader2,
+  FilterX,
+  TrendingUp,
+  Users,
+  MapPin,
+  Star,
+  ChevronDown,
+  SlidersHorizontal,
+  X
 } from "lucide-react";
 
 interface Listing {
@@ -86,6 +94,14 @@ interface Review {
   tags: string[];
   author: string;
   date: string;
+}
+
+interface QuickFilter {
+  id: string;
+  label: string;
+  count: number;
+  color: string;
+  active: boolean;
 }
 
 const mockListings: Listing[] = [
@@ -199,6 +215,32 @@ const mockBookings: Booking[] = [
     message: "Holiday family photos",
     createdAt: "2024-12-11",
     isHost: true
+  },
+  {
+    id: "b5",
+    listingId: "1",
+    listingTitle: "Professional Photography Companion", 
+    guestName: "Anna Davis",
+    hostName: "Current User",
+    dates: "Dec 18-19, 2024",
+    status: "rejected",
+    amount: 170,
+    message: "Birthday party photography",
+    createdAt: "2024-12-09",
+    isHost: true
+  },
+  {
+    id: "b6",
+    listingId: "2",
+    listingTitle: "Vintage Film Camera Collection", 
+    guestName: "Tom Wilson",
+    hostName: "Current User",
+    dates: "Jan 2-4, 2025",
+    status: "confirmed",
+    amount: 135,
+    message: "New Year project",
+    createdAt: "2024-12-13",
+    isHost: true
   }
 ];
 
@@ -216,7 +258,7 @@ const mockReviews: Review[] = [
 
 export default function ListingsAndBooking() {
   const { data: session } = useSession();
-  const [activeView, setActiveView] = useState<"listings" | "bookings" | "host">("listings");
+  const [activeView, setActiveView] = useState<"listings" | "bookings" | "host">("bookings");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
   const [showBookingFlow, setShowBookingFlow] = useState(false);
@@ -224,10 +266,13 @@ export default function ListingsAndBooking() {
   const [showWallet, setShowWallet] = useState(false);
   const [showCreateListing, setShowCreateListing] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   
-  // Search state
+  // Enhanced search state
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
+  const [searchResults, setSearchResults] = useState<{listings: Listing[], bookings: Booking[]}>({listings: [], bookings: []});
+  const [hasSearched, setHasSearched] = useState(false);
   
   // Enhanced filter states
   const [filters, setFilters] = useState({
@@ -238,19 +283,87 @@ export default function ListingsAndBooking() {
     availability: "all"
   });
 
-  // Booking filters state
+  // Enhanced booking filters state
   const [bookingFilters, setBookingFilters] = useState({
     status: "all", // all, pending, confirmed, rejected, completed, cancelled
     bookingType: "all", // all, sent (bookings I made), received (bookings I received)
     dateRange: "all", // all, upcoming, past, this_month
     hostName: "",
-    searchQuery: ""
+    searchQuery: "",
+    quickFilter: "" // for quick filter buttons
   });
 
   // Data states
   const [listings, setListings] = useState<Listing[]>(mockListings);
   const [bookings, setBookings] = useState<Booking[]>(mockBookings);
   const [walletBalance] = useState(1247.50);
+  const [bookingData, setBookingData] = useState({
+    message: "",
+    paymentMethod: "card"
+  });
+
+  // Quick filters for bookings
+  const getQuickFilters = (): QuickFilter[] => {
+    const stats = getBookingStatusStats();
+    return [
+      {
+        id: "all",
+        label: "All Bookings",
+        count: stats.total,
+        color: "bg-gray-500",
+        active: bookingFilters.quickFilter === ""
+      },
+      {
+        id: "who_you_booked",
+        label: "Who You Booked",
+        count: stats.sent,
+        color: "bg-blue-500",
+        active: bookingFilters.quickFilter === "who_you_booked"
+      },
+      {
+        id: "who_booked_you", 
+        label: "Who Booked You",
+        count: stats.received,
+        color: "bg-green-500",
+        active: bookingFilters.quickFilter === "who_booked_you"
+      },
+      {
+        id: "who_accepted",
+        label: "Who Accepted",
+        count: bookings.filter(b => b.status === "confirmed" && !b.isHost).length,
+        color: "bg-emerald-500",
+        active: bookingFilters.quickFilter === "who_accepted"
+      },
+      {
+        id: "who_rejected",
+        label: "Who Rejected",
+        count: bookings.filter(b => b.status === "rejected" && !b.isHost).length,
+        color: "bg-red-500",
+        active: bookingFilters.quickFilter === "who_rejected"
+      },
+      {
+        id: "you_accepted",
+        label: "You Accepted", 
+        count: bookings.filter(b => b.status === "confirmed" && b.isHost).length,
+        color: "bg-teal-500", 
+        active: bookingFilters.quickFilter === "you_accepted"
+      },
+      {
+        id: "you_rejected",
+        label: "You Rejected", 
+        count: bookings.filter(b => b.status === "rejected" && b.isHost).length,
+        color: "bg-rose-500",
+        active: bookingFilters.quickFilter === "you_rejected"
+      },
+      {
+        id: "pending_your_response",
+        label: "Pending Your Response",
+        count: bookings.filter(b => b.status === "pending" && b.isHost).length,
+        color: "bg-yellow-500",
+        active: bookingFilters.quickFilter === "pending_your_response"
+      }
+    ];
+  };
 
   // Fetch data from APIs
   useEffect(() => {
@@ -341,31 +454,98 @@ export default function ListingsAndBooking() {
     }
   }, []);
 
+  // Enhanced search functionality
   const handleSearch = useCallback(async () => {
-    if (!searchQuery.trim()) return;
+    if (!searchQuery.trim()) {
+      toast.error("Please enter a search term");
+      return;
+    }
     
     setIsSearching(true);
+    setHasSearched(true);
+    
     try {
+      // Simulate API search with loading delay
+      await new Promise(resolve => setTimeout(resolve, 800));
+      
       if (activeView === "listings") {
         // Search listings
-        const filteredListings = mockListings.filter(listing =>
+        const filteredListings = listings.filter(listing =>
           listing.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
           listing.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
           listing.location.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          listing.category.toLowerCase().includes(searchQuery.toLowerCase())
+          listing.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          listing.host.name.toLowerCase().includes(searchQuery.toLowerCase())
         );
-        setListings(filteredListings);
+        setSearchResults({ listings: filteredListings, bookings: [] });
+        toast.success(`Found ${filteredListings.length} listings for "${searchQuery}"`);
       } else if (activeView === "bookings") {
-        // Update booking search filter
-        setBookingFilters(prev => ({...prev, searchQuery}));
+        // Search bookings
+        const filteredBookings = bookings.filter(booking =>
+          booking.listingTitle.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          booking.guestName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          booking.hostName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          booking.message.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          booking.dates.toLowerCase().includes(searchQuery.toLowerCase())
+        );
+        setSearchResults({ listings: [], bookings: filteredBookings });
+        toast.success(`Found ${filteredBookings.length} bookings for "${searchQuery}"`);
       }
-      toast.success(`Search completed for "${searchQuery}"`);
     } catch (error) {
       toast.error("Search failed. Please try again.");
     } finally {
       setIsSearching(false);
     }
-  }, [searchQuery, activeView]);
+  }, [searchQuery, activeView, listings, bookings]);
+
+  const clearSearch = useCallback(() => {
+    setSearchQuery("");
+    setHasSearched(false);
+    setSearchResults({ listings: [], bookings: [] });
+  }, []);
+
+  const handleQuickFilter = useCallback((filterId: string) => {
+    let newFilters = { ...bookingFilters };
+    
+    if (filterId === "all") {
+      newFilters = {
+        status: "all",
+        bookingType: "all",
+        dateRange: "all",
+        hostName: "",
+        searchQuery: "",
+        quickFilter: ""
+      };
+    } else if (filterId === "who_you_booked") {
+      newFilters.bookingType = "sent";
+      newFilters.quickFilter = "who_you_booked";
+    } else if (filterId === "who_booked_you") {
+      newFilters.bookingType = "received";
+      newFilters.quickFilter = "who_booked_you";
+    } else if (filterId === "who_accepted") {
+      newFilters.status = "confirmed";
+      newFilters.bookingType = "sent";
+      newFilters.quickFilter = "who_accepted";
+    } else if (filterId === "who_rejected") {
+      newFilters.status = "rejected";
+      newFilters.bookingType = "sent";
+      newFilters.quickFilter = "who_rejected";
+    } else if (filterId === "you_accepted") {
+      newFilters.status = "confirmed";
+      newFilters.bookingType = "received";
+      newFilters.quickFilter = "you_accepted";
+    } else if (filterId === "you_rejected") {
+      newFilters.status = "rejected";
+      newFilters.bookingType = "received";
+      newFilters.quickFilter = "you_rejected";
+    } else if (filterId === "pending_your_response") {
+      newFilters.status = "pending";
+      newFilters.bookingType = "received";
+      newFilters.quickFilter = "pending_your_response";
+    }
+    
+    setBookingFilters(newFilters);
+  }, [bookingFilters]);
 
   const handleBookingRequest = useCallback(() => {
     toast.success("Booking request sent successfully!");
@@ -378,27 +558,34 @@ export default function ListingsAndBooking() {
   }, []);
 
   // Enhanced booking filtering
-  const filteredBookings = bookings.filter(booking => {
-    if (bookingFilters.status !== "all" && booking.status !== bookingFilters.status) return false;
-    if (bookingFilters.bookingType === "sent" && booking.isHost) return false;
-    if (bookingFilters.bookingType === "received" && !booking.isHost) return false;
-    if (bookingFilters.hostName && !booking.hostName.toLowerCase().includes(bookingFilters.hostName.toLowerCase())) return false;
-    if (bookingFilters.searchQuery && !(
-      booking.listingTitle.toLowerCase().includes(bookingFilters.searchQuery.toLowerCase()) ||
-      booking.guestName.toLowerCase().includes(bookingFilters.searchQuery.toLowerCase()) ||
-      booking.hostName.toLowerCase().includes(bookingFilters.searchQuery.toLowerCase())
-    )) return false;
-    return true;
-  });
+  const filteredBookings = (() => {
+    let filtered = hasSearched ? searchResults.bookings : bookings;
+    
+    filtered = filtered.filter(booking => {
+      if (bookingFilters.status !== "all" && booking.status !== bookingFilters.status) return false;
+      if (bookingFilters.bookingType === "sent" && booking.isHost) return false;
+      if (bookingFilters.bookingType === "received" && !booking.isHost) return false;
+      if (bookingFilters.hostName && !booking.hostName.toLowerCase().includes(bookingFilters.hostName.toLowerCase())) return false;
+      return true;
+    });
+    
+    return filtered;
+  })();
 
-  const filteredListings = listings.filter(listing => {
-    if (filters.type !== "all" && listing.type !== filters.type) return false;
-    if (filters.category !== "all" && listing.category !== filters.category) return false;
-    if (listing.price < filters.priceRange[0] || listing.price > filters.priceRange[1]) return false;
-    if (filters.location && !listing.location.toLowerCase().includes(filters.location.toLowerCase())) return false;
-    if (filters.availability !== "all" && listing.availability !== filters.availability) return false;
-    return true;
-  });
+  const filteredListings = (() => {
+    let filtered = hasSearched ? searchResults.listings : listings;
+    
+    filtered = filtered.filter(listing => {
+      if (filters.type !== "all" && listing.type !== filters.type) return false;
+      if (filters.category !== "all" && listing.category !== filters.category) return false;
+      if (listing.price < filters.priceRange[0] || listing.price > filters.priceRange[1]) return false;
+      if (filters.location && !listing.location.toLowerCase().includes(filters.location.toLowerCase())) return false;
+      if (filters.availability !== "all" && listing.availability !== filters.availability) return false;
+      return true;
+    });
+    
+    return filtered;
+  })();
 
   const getBookingStatusIcon = (status: string) => {
     switch (status) {
@@ -423,6 +610,314 @@ export default function ListingsAndBooking() {
     };
     return stats;
   };
+
+  // Enhanced search header component
+  const EnhancedSearchHeader = () => (
+    <div className="space-y-6 mb-8">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <h1 className="text-3xl font-bold">Listings & Bookings</h1>
+          <Tabs value={activeView} onValueChange={(value) => setActiveView(value as "listings" | "bookings" | "host")}>
+            <TabsList>
+              <TabsTrigger value="listings">Browse Listings</TabsTrigger>
+              <TabsTrigger value="bookings">My Bookings</TabsTrigger>
+              <TabsTrigger value="host">Host Tools</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
+        
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setShowWallet(true)}>
+            <Wallet className="w-4 h-4 mr-2" />
+            Wallet
+          </Button>
+          {activeView === "host" && (
+            <Button onClick={() => setShowCreateListing(true)}>
+              Create Listing
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Prominent Search Section */}
+      <Card className="border-2 border-primary/20 bg-gradient-to-r from-primary/5 to-accent/10">
+        <CardContent className="p-6">
+          <div className="space-y-4">
+            <div className="text-center">
+              <h2 className="text-xl font-semibold mb-2">
+                {activeView === "listings" 
+                  ? "🔍 Find the Perfect Service or Item" 
+                  : activeView === "bookings"
+                  ? "🔍 Search Your Bookings"
+                  : "🔍 Search Your Listings"
+                }
+              </h2>
+              <p className="text-muted-foreground">
+                {activeView === "listings" 
+                  ? "Search by name, location, category, or host to discover amazing experiences"
+                  : activeView === "bookings" 
+                  ? "Find specific bookings by searching names, locations, dates, or messages"
+                  : "Manage and search your active listings"
+                }
+              </p>
+            </div>
+            
+            <div className="flex gap-3 max-w-4xl mx-auto">
+              <div className="flex-1 relative">
+                <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+                <Input
+                  placeholder={
+                    activeView === "listings" 
+                      ? "Search listings, hosts, locations, categories..." 
+                      : activeView === "bookings"
+                      ? "Search bookings, hosts, guests, dates, messages..."
+                      : "Search your listings..."
+                  }
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+                  className="text-base pl-12 pr-4 py-6 text-lg border-2 focus:border-primary"
+                />
+                {searchQuery && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={clearSearch}
+                    className="absolute right-20 top-1/2 transform -translate-y-1/2"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+              <Button 
+                onClick={handleSearch}
+                disabled={isSearching || !searchQuery.trim()}
+                className="px-8 py-6 text-lg font-semibold min-w-32"
+                size="lg"
+              >
+                {isSearching ? (
+                  <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                ) : (
+                  <Search className="w-5 h-5 mr-2" />
+                )}
+                {isSearching ? "Searching..." : "Search"}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                className="px-6 py-6"
+                size="lg"
+              >
+                <SlidersHorizontal className="w-5 h-5 mr-2" />
+                Filters
+                <ChevronDown className={`w-4 h-4 ml-2 transition-transform ${showAdvancedFilters ? 'rotate-180' : ''}`} />
+              </Button>
+            </div>
+
+            {/* Search Results Summary */}
+            {hasSearched && (
+              <div className="text-center">
+                <div className="inline-flex items-center gap-2 px-4 py-2 bg-white rounded-full border">
+                  <Search className="h-4 w-4 text-primary" />
+                  <span className="text-sm">
+                    {activeView === "listings" 
+                      ? `${searchResults.listings.length} listings found for "${searchQuery}"`
+                      : `${searchResults.bookings.length} bookings found for "${searchQuery}"`
+                    }
+                  </span>
+                  <Button variant="ghost" size="sm" onClick={clearSearch} className="h-6 w-6 p-0">
+                    <X className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Advanced Filters Dropdown */}
+      {showAdvancedFilters && (
+        <Card className="border-dashed">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Filter className="w-5 h-5" />
+              Advanced Filters
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {activeView === "listings" ? (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div>
+                  <Label>Type</Label>
+                  <Select value={filters.type} onValueChange={(value) => setFilters({...filters, type: value})}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Types</SelectItem>
+                      <SelectItem value="companion">Companions</SelectItem>
+                      <SelectItem value="item">Items</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <div>
+                  <Label>Category</Label>
+                  <Select value={filters.category} onValueChange={(value) => setFilters({...filters, category: value})}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Categories</SelectItem>
+                      <SelectItem value="Photography">Photography</SelectItem>
+                      <SelectItem value="Photography Equipment">Equipment</SelectItem>
+                      <SelectItem value="Events">Events</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label>Location</Label>
+                  <Input
+                    placeholder="Enter city or area"
+                    value={filters.location}
+                    onChange={(e) => setFilters({...filters, location: e.target.value})}
+                  />
+                </div>
+
+                <div>
+                  <Label>Availability</Label>
+                  <Select value={filters.availability} onValueChange={(value) => setFilters({...filters, availability: value})}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All</SelectItem>
+                      <SelectItem value="available">Available</SelectItem>
+                      <SelectItem value="busy">Busy</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div>
+                  <Label>Status</Label>
+                  <Select value={bookingFilters.status} onValueChange={(value) => setBookingFilters({...bookingFilters, status: value})}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Statuses</SelectItem>
+                      <SelectItem value="pending">Pending</SelectItem>
+                      <SelectItem value="confirmed">Confirmed</SelectItem>
+                      <SelectItem value="rejected">Rejected</SelectItem>
+                      <SelectItem value="completed">Completed</SelectItem>
+                      <SelectItem value="cancelled">Cancelled</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label>Booking Type</Label>
+                  <Select value={bookingFilters.bookingType} onValueChange={(value) => setBookingFilters({...bookingFilters, bookingType: value})}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Bookings</SelectItem>
+                      <SelectItem value="sent">You Booked</SelectItem>
+                      <SelectItem value="received">Booked You</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label>Host/Guest Name</Label>
+                  <Input
+                    placeholder="Search by name..."
+                    value={bookingFilters.hostName}
+                    onChange={(e) => setBookingFilters({...bookingFilters, hostName: e.target.value})}
+                  />
+                </div>
+
+                <div>
+                  <Label>Date Range</Label>
+                  <Select value={bookingFilters.dateRange} onValueChange={(value) => setBookingFilters({...bookingFilters, dateRange: value})}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Time</SelectItem>
+                      <SelectItem value="upcoming">Upcoming</SelectItem>
+                      <SelectItem value="past">Past</SelectItem>
+                      <SelectItem value="this_month">This Month</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+            
+            <div className="flex justify-end mt-4">
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  if (activeView === "listings") {
+                    setFilters({
+                      type: "all",
+                      category: "all",
+                      priceRange: [0, 200],
+                      location: "",
+                      availability: "all"
+                    });
+                  } else {
+                    setBookingFilters({
+                      status: "all",
+                      bookingType: "all",
+                      dateRange: "all",
+                      hostName: "",
+                      searchQuery: "",
+                      quickFilter: ""
+                    });
+                  }
+                }}
+              >
+                <FilterX className="w-4 h-4 mr-2" />
+                Clear All Filters
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+
+  // Enhanced Quick Filter Chips for Bookings
+  const QuickFilterChips = () => (
+    <div className="mb-6">
+      <div className="flex items-center gap-2 mb-3">
+        <h3 className="font-semibold">Quick Filters:</h3>
+        <Badge variant="outline" className="text-xs">Click to filter</Badge>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {getQuickFilters().map((filter) => (
+          <Button
+            key={filter.id}
+            variant={filter.active ? "default" : "outline"}
+            size="sm"
+            onClick={() => handleQuickFilter(filter.id)}
+            className={`flex items-center gap-2 ${filter.active ? 'shadow-lg' : ''}`}
+          >
+            <div className={`w-2 h-2 rounded-full ${filter.color}`} />
+            {filter.label}
+            <Badge variant="secondary" className="text-xs ml-1">
+              {filter.count}
+            </Badge>
+          </Button>
+        ))}
+      </div>
+    </div>
+  );
 
   const ListingCard = ({ listing }: { listing: Listing }) => (
     <Card className="group cursor-pointer transition-all hover:shadow-lg" onClick={() => setSelectedListing(listing)}>
@@ -810,205 +1305,25 @@ export default function ListingsAndBooking() {
     </Dialog>
   );
 
-  const BookingFilters = () => (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Filter className="w-5 h-5" />
-          Booking Filters
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div>
-          <Label>Status</Label>
-          <Select value={bookingFilters.status} onValueChange={(value) => setBookingFilters({...bookingFilters, status: value})}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Statuses</SelectItem>
-              <SelectItem value="pending">Pending</SelectItem>
-              <SelectItem value="confirmed">Confirmed</SelectItem>
-              <SelectItem value="rejected">Rejected</SelectItem>
-              <SelectItem value="completed">Completed</SelectItem>
-              <SelectItem value="cancelled">Cancelled</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div>
-          <Label>Booking Type</Label>
-          <Select value={bookingFilters.bookingType} onValueChange={(value) => setBookingFilters({...bookingFilters, bookingType: value})}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Bookings</SelectItem>
-              <SelectItem value="sent">
-                <div className="flex items-center gap-2">
-                  <UserCheck className="h-4 w-4" />
-                  Who You Booked
-                </div>
-              </SelectItem>
-              <SelectItem value="received">
-                <div className="flex items-center gap-2">
-                  <UserX className="h-4 w-4" />
-                  Who Booked You
-                </div>
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div>
-          <Label>Host/Guest Name</Label>
-          <Input
-            placeholder="Search by name..."
-            value={bookingFilters.hostName}
-            onChange={(e) => setBookingFilters({...bookingFilters, hostName: e.target.value})}
-          />
-        </div>
-
-        <div>
-          <Label>Date Range</Label>
-          <Select value={bookingFilters.dateRange} onValueChange={(value) => setBookingFilters({...bookingFilters, dateRange: value})}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Time</SelectItem>
-              <SelectItem value="upcoming">Upcoming</SelectItem>
-              <SelectItem value="past">Past</SelectItem>
-              <SelectItem value="this_month">This Month</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <Button 
-          variant="outline" 
-          className="w-full"
-          onClick={() => setBookingFilters({
-            status: "all",
-            bookingType: "all", 
-            dateRange: "all",
-            hostName: "",
-            searchQuery: ""
-          })}
-        >
-          Clear Filters
-        </Button>
-      </CardContent>
-    </Card>
-  );
-
   return (
     <div className="min-h-screen bg-background">
       <div className="container mx-auto px-4 py-6">
-        {/* Header with Primary Search */}
-        <div className="space-y-6 mb-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <h1 className="text-3xl font-bold">Listings & Bookings</h1>
-              <Tabs value={activeView} onValueChange={(value) => setActiveView(value as "listings" | "bookings" | "host")}>
-                <TabsList>
-                  <TabsTrigger value="listings">Browse Listings</TabsTrigger>
-                  <TabsTrigger value="bookings">My Bookings</TabsTrigger>
-                  <TabsTrigger value="host">Host Tools</TabsTrigger>
-                </TabsList>
-              </Tabs>
-            </div>
-            
-            <div className="flex items-center gap-2">
-              <Button variant="outline" onClick={() => setShowWallet(true)}>
-                <Wallet className="w-4 h-4 mr-2" />
-                Wallet
-              </Button>
-              {activeView === "host" && (
-                <Button onClick={() => setShowCreateListing(true)}>
-                  Create Listing
-                </Button>
-              )}
-            </div>
-          </div>
-
-          {/* Primary Search Bar */}
-          <Card className="p-4">
-            <div className="flex gap-4">
-              <div className="flex-1">
-                <Input
-                  placeholder={
-                    activeView === "listings" 
-                      ? "Search listings, locations, categories..." 
-                      : activeView === "bookings"
-                      ? "Search bookings, hosts, guests..."
-                      : "Search your listings..."
-                  }
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-                  className="text-base"
-                />
-              </div>
-              <Button 
-                onClick={handleSearch}
-                disabled={isSearching || !searchQuery.trim()}
-                className="px-8"
-              >
-                {isSearching ? (
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                ) : (
-                  <Search className="w-4 h-4 mr-2" />
-                )}
-                Search
-              </Button>
-            </div>
-          </Card>
-        </div>
+        <EnhancedSearchHeader />
 
         {activeView === "listings" && (
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-            {/* Filters Sidebar */}
+            {/* Price Range Filter */}
             <div className="lg:col-span-1">
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <CalendarSearch className="w-5 h-5" />
-                    Filters
+                    Price Range
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div>
-                    <Label>Type</Label>
-                    <Select value={filters.type} onValueChange={(value) => setFilters({...filters, type: value})}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Types</SelectItem>
-                        <SelectItem value="companion">Companions</SelectItem>
-                        <SelectItem value="item">Items</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  
-                  <div>
-                    <Label>Category</Label>
-                    <Select value={filters.category} onValueChange={(value) => setFilters({...filters, category: value})}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Categories</SelectItem>
-                        <SelectItem value="Photography">Photography</SelectItem>
-                        <SelectItem value="Photography Equipment">Equipment</SelectItem>
-                        <SelectItem value="Events">Events</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div>
-                    <Label>Price Range</Label>
-                    <div className="mt-2">
+                <CardContent>
+                  <div className="space-y-4">
+                    <div>
                       <Slider
                         value={filters.priceRange}
                         onValueChange={(value) => setFilters({...filters, priceRange: value})}
@@ -1022,29 +1337,6 @@ export default function ListingsAndBooking() {
                       </div>
                     </div>
                   </div>
-
-                  <div>
-                    <Label>Location</Label>
-                    <Input
-                      placeholder="Enter city or area"
-                      value={filters.location}
-                      onChange={(e) => setFilters({...filters, location: e.target.value})}
-                    />
-                  </div>
-
-                  <div>
-                    <Label>Availability</Label>
-                    <Select value={filters.availability} onValueChange={(value) => setFilters({...filters, availability: value})}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All</SelectItem>
-                        <SelectItem value="available">Available</SelectItem>
-                        <SelectItem value="busy">Busy</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
                 </CardContent>
               </Card>
             </div>
@@ -1054,6 +1346,7 @@ export default function ListingsAndBooking() {
               <div className="flex justify-between items-center mb-4">
                 <span className="text-muted-foreground">
                   {filteredListings.length} listings found
+                  {hasSearched && <span className="text-primary ml-2">• Search Results</span>}
                 </span>
                 <div className="flex items-center gap-2">
                   <Button
@@ -1064,7 +1357,7 @@ export default function ListingsAndBooking() {
                     Grid
                   </Button>
                   <Button
-                    variant={viewMode === "list" ? "default" : "outline"}
+                    variant={viewMode === "list" ? "default" : "outline"}  
                     size="sm"
                     onClick={() => setViewMode("list")}
                   >
@@ -1090,152 +1383,227 @@ export default function ListingsAndBooking() {
         )}
 
         {activeView === "bookings" && (
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-            {/* Booking Filters Sidebar */}
-            <div className="lg:col-span-1 space-y-4">
-              <BookingFilters />
-              
-              {/* Booking Stats */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Booking Stats</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {(() => {
-                    const stats = getBookingStatusStats();
-                    return (
-                      <>
-                        <div className="flex justify-between">
-                          <span className="text-sm">Total Bookings</span>
-                          <span className="font-medium">{stats.total}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-sm">Pending</span>
-                          <span className="font-medium text-yellow-600">{stats.pending}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-sm">Confirmed</span>
-                          <span className="font-medium text-green-600">{stats.confirmed}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-sm">Rejected</span>
-                          <span className="font-medium text-red-600">{stats.rejected}</span>
-                        </div>
-                        <Separator />
-                        <div className="flex justify-between">
-                          <span className="text-sm">You Booked</span>
-                          <span className="font-medium">{stats.sent}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-sm">Booked You</span>
-                          <span className="font-medium">{stats.received}</span>
-                        </div>
-                      </>
-                    );
-                  })()}
-                </CardContent>
-              </Card>
-            </div>
+          <div className="space-y-6">
+            <QuickFilterChips />
+            
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+              {/* Enhanced Booking Stats Sidebar */}
+              <div className="lg:col-span-1 space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <TrendingUp className="w-5 h-5" />
+                      Booking Overview
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {(() => {
+                      const stats = getBookingStatusStats();
+                      return (
+                        <>
+                          <div className="flex justify-between items-center p-3 bg-gradient-to-r from-blue-50 to-blue-100 rounded-lg">
+                            <div className="flex items-center gap-2">
+                              <Users className="h-4 w-4 text-blue-600" />
+                              <span className="text-sm font-medium">Total Bookings</span>
+                            </div>
+                            <span className="text-xl font-bold text-blue-600">{stats.total}</span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="p-2 bg-yellow-50 rounded text-center">
+                              <div className="text-lg font-bold text-yellow-600">{stats.pending}</div>
+                              <div className="text-xs text-yellow-700">Pending</div>
+                            </div>
+                            <div className="p-2 bg-green-50 rounded text-center">
+                              <div className="text-lg font-bold text-green-600">{stats.confirmed}</div>
+                              <div className="text-xs text-green-700">Confirmed</div>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="p-2 bg-red-50 rounded text-center">
+                              <div className="text-lg font-bold text-red-600">{stats.rejected}</div>
+                              <div className="text-xs text-red-700">Rejected</div>
+                            </div>
+                            <div className="p-2 bg-gray-50 rounded text-center">
+                              <div className="text-lg font-bold text-gray-600">{stats.completed}</div>
+                              <div className="text-xs text-gray-700">Completed</div>
+                            </div>
+                          </div>
+                          <Separator />
+                          <div className="space-y-2">
+                            <div className="flex justify-between">
+                              <span className="text-sm text-muted-foreground">You Booked</span>
+                              <span className="font-medium">{stats.sent}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-sm text-muted-foreground">Booked You</span>
+                              <span className="font-medium">{stats.received}</span>
+                            </div>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </CardContent>
+                </Card>
 
-            {/* Bookings List */}
-            <div className="lg:col-span-3">
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground">
-                    {filteredBookings.length} bookings found
-                  </span>
-                </div>
+                {/* Quick Actions */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Quick Actions</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    <Button 
+                      variant="outline" 
+                      className="w-full justify-start"
+                      onClick={() => handleQuickFilter("pending_your_response")}
+                    >
+                      <Clock className="w-4 h-4 mr-2" />
+                      Pending Your Response
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      className="w-full justify-start"
+                      onClick={() => setActiveView("listings")}
+                    >
+                      <Search className="w-4 h-4 mr-2" />
+                      Browse New Listings
+                    </Button>
+                  </CardContent>
+                </Card>
+              </div>
 
-                {loading ? (
-                  <div className="flex items-center justify-center py-8">
-                    <Loader2 className="h-8 w-8 animate-spin" />
-                    <span className="ml-2">Loading bookings...</span>
+              {/* Enhanced Bookings List */}
+              <div className="lg:col-span-3">
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <div className="flex items-center gap-4">
+                      <span className="text-muted-foreground">
+                        {filteredBookings.length} bookings found
+                        {hasSearched && <span className="text-primary ml-2">• Search Results</span>}
+                      </span>
+                      {bookingFilters.quickFilter && (
+                        <Badge variant="secondary" className="flex items-center gap-1">
+                          <Filter className="w-3 h-3" />
+                          {getQuickFilters().find(f => f.id === bookingFilters.quickFilter)?.label}
+                        </Badge>
+                      )}
+                    </div>
                   </div>
-                ) : filteredBookings.length === 0 ? (
-                  <Card className="p-8 text-center">
-                    <CalendarX className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                    <h3 className="text-lg font-semibold mb-2">No bookings found</h3>
-                    <p className="text-muted-foreground">
-                      {bookingFilters.status === "all" && bookingFilters.bookingType === "all"
-                        ? "You don't have any bookings yet. Start by browsing listings!"
-                        : "No bookings match your current filters. Try adjusting your search criteria."
-                      }
-                    </p>
-                  </Card>
-                ) : (
-                  <div className="space-y-4">
-                    {filteredBookings.map((booking) => (
-                      <Card key={booking.id}>
-                        <CardContent className="p-6">
-                          <div className="flex items-center justify-between mb-4">
-                            <div className="flex items-center gap-3">
-                              {getBookingStatusIcon(booking.status)}
-                              <div>
-                                <h3 className="font-semibold">{booking.listingTitle}</h3>
+
+                  {loading ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="h-8 w-8 animate-spin" />
+                      <span className="ml-2">Loading bookings...</span>
+                    </div>
+                  ) : filteredBookings.length === 0 ? (
+                    <Card className="p-8 text-center">
+                      <CalendarX className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                      <h3 className="text-lg font-semibold mb-2">
+                        {hasSearched ? "No matching bookings found" : "No bookings found"}
+                      </h3>
+                      <p className="text-muted-foreground mb-4">
+                        {hasSearched 
+                          ? `No bookings match your search for "${searchQuery}". Try a different search term or clear your filters.`
+                          : bookingFilters.quickFilter
+                          ? "No bookings match your current filter. Try selecting a different filter."
+                          : "You don't have any bookings yet. Start by browsing listings!"
+                        }
+                      </p>
+                      <div className="flex gap-2 justify-center">
+                        {hasSearched && (
+                          <Button variant="outline" onClick={clearSearch}>
+                            Clear Search
+                          </Button>
+                        )}
+                        <Button onClick={() => setActiveView("listings")}>
+                          Browse Listings
+                        </Button>
+                      </div>
+                    </Card>
+                  ) : (
+                    <div className="space-y-4">
+                      {filteredBookings.map((booking) => (
+                        <Card key={booking.id} className="hover:shadow-md transition-shadow">
+                          <CardContent className="p-6">
+                            <div className="flex items-center justify-between mb-4">
+                              <div className="flex items-center gap-3">
+                                {getBookingStatusIcon(booking.status)}
+                                <div>
+                                  <h3 className="font-semibold">{booking.listingTitle}</h3>
+                                  <p className="text-sm text-muted-foreground flex items-center gap-2">
+                                    <Users className="h-3 w-3" />
+                                    {booking.isHost ? `Guest: ${booking.guestName}` : `Host: ${booking.hostName}`}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <Badge variant={
+                                  booking.status === "confirmed" ? "default" :
+                                  booking.status === "pending" ? "secondary" :
+                                  booking.status === "completed" ? "outline" : "destructive"
+                                } className="mb-1">
+                                  {booking.status}
+                                </Badge>
                                 <p className="text-sm text-muted-foreground">
-                                  {booking.isHost ? `Guest: ${booking.guestName}` : `Host: ${booking.hostName}`}
+                                  {booking.isHost ? "As Host" : "As Guest"}
                                 </p>
                               </div>
                             </div>
-                            <div className="text-right">
-                              <Badge variant={
-                                booking.status === "confirmed" ? "default" :
-                                booking.status === "pending" ? "secondary" :
-                                booking.status === "completed" ? "outline" : "destructive"
-                              }>
-                                {booking.status}
-                              </Badge>
-                              <p className="text-sm text-muted-foreground mt-1">
-                                {booking.isHost ? "As Host" : "As Guest"}
-                              </p>
-                            </div>
-                          </div>
-                          
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                            <div>
-                              <p className="text-muted-foreground">Dates</p>
-                              <p className="font-medium">{booking.dates}</p>
-                            </div>
-                            <div>
-                              <p className="text-muted-foreground">Amount</p>
-                              <p className="font-medium">${booking.amount}</p>
-                            </div>
-                            <div>
-                              <p className="text-muted-foreground">Booked</p>
-                              <p className="font-medium">{new Date(booking.createdAt).toLocaleDateString()}</p>
-                            </div>
-                            <div>
-                              <p className="text-muted-foreground">Actions</p>
-                              <div className="flex gap-1">
-                                {booking.status === "pending" && booking.isHost && (
-                                  <>
-                                    <Button size="sm" onClick={() => handleBookingAction(booking.id, "accept")}>
-                                      Accept
+                            
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mb-4">
+                              <div>
+                                <p className="text-muted-foreground flex items-center gap-1">
+                                  <CalendarIcon className="h-3 w-3" />
+                                  Dates
+                                </p>
+                                <p className="font-medium">{booking.dates}</p>
+                              </div>
+                              <div>
+                                <p className="text-muted-foreground flex items-center gap-1">
+                                  <Wallet className="h-3 w-3" />
+                                  Amount
+                                </p>
+                                <p className="font-medium">${booking.amount}</p>
+                              </div>
+                              <div>
+                                <p className="text-muted-foreground flex items-center gap-1">
+                                  <Clock className="h-3 w-3" />
+                                  Booked
+                                </p>
+                                <p className="font-medium">{new Date(booking.createdAt).toLocaleDateString()}</p>
+                              </div>
+                              <div>
+                                <p className="text-muted-foreground">Actions</p>
+                                <div className="flex gap-1">
+                                  {booking.status === "pending" && booking.isHost && (
+                                    <>
+                                      <Button size="sm" onClick={() => handleBookingAction(booking.id, "accept")}>
+                                        Accept
+                                      </Button>
+                                      <Button size="sm" variant="outline" onClick={() => handleBookingAction(booking.id, "reject")}>
+                                        Reject
+                                      </Button>
+                                    </>
+                                  )}
+                                  {booking.status === "confirmed" && (
+                                    <Button size="sm" variant="outline">
+                                      Contact
                                     </Button>
-                                    <Button size="sm" variant="outline" onClick={() => handleBookingAction(booking.id, "reject")}>
-                                      Reject
-                                    </Button>
-                                  </>
-                                )}
-                                {booking.status === "confirmed" && (
-                                  <Button size="sm" variant="outline">
-                                    Contact
-                                  </Button>
-                                )}
+                                  )}
+                                </div>
                               </div>
                             </div>
-                          </div>
-                          
-                          {booking.message && (
-                            <div className="mt-4 p-3 bg-muted rounded-lg">
-                              <p className="text-sm"><strong>Message:</strong> {booking.message}</p>
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                )}
+                            
+                            {booking.message && (
+                              <div className="mt-4 p-3 bg-muted rounded-lg">
+                                <p className="text-sm"><strong>Message:</strong> {booking.message}</p>
+                              </div>
+                            )}
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>

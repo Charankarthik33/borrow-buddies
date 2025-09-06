@@ -4,6 +4,11 @@ import { useEffect, useState } from "react"
 
 export const authClient = createAuthClient({
    baseURL: typeof window !== 'undefined' ? window.location.origin : process.env.NEXT_PUBLIC_SITE_URL,
+   headers: () => {
+      // Include bearer token in all requests
+      const token = typeof window !== 'undefined' ? localStorage.getItem("bearer_token") : null;
+      return token ? { Authorization: `Bearer ${token}` } : {};
+   }
 });
 
 type SessionData = {
@@ -26,10 +31,12 @@ export function useSession(): SessionData {
 
    const fetchSession = async () => {
       try {
+         // Include bearer token in session check
          const res = await authClient.getSession();
          setSession(res.data);
          setError(null);
       } catch (err) {
+         console.error("Session fetch error:", err);
          setSession(null);
          setError(err);
       } finally {
@@ -39,6 +46,18 @@ export function useSession(): SessionData {
 
    useEffect(() => {
       fetchSession();
+
+      // Listen for storage changes to handle login/logout from other tabs
+      const handleStorageChange = (event) => {
+         if (event.key === "bearer_token") {
+            fetchSession();
+         }
+      };
+
+      if (typeof window !== 'undefined') {
+         window.addEventListener('storage', handleStorageChange);
+         return () => window.removeEventListener('storage', handleStorageChange);
+      }
    }, []);
 
    return { data: session, isPending, error, refetch };

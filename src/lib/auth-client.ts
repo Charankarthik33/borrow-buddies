@@ -4,10 +4,13 @@ import { useEffect, useState } from "react"
 
 export const authClient = createAuthClient({
    baseURL: typeof window !== 'undefined' ? window.location.origin : process.env.NEXT_PUBLIC_SITE_URL,
-   headers: () => {
-      // Include bearer token in all requests
-      const token = typeof window !== 'undefined' ? localStorage.getItem("bearer_token") : null;
-      return token ? { Authorization: `Bearer ${token}` } : {};
+   fetchOptions: {
+     onSuccess: (ctx) => {
+       const authToken = ctx.response.headers.get("set-auth-token")
+       if(authToken){
+         localStorage.setItem("bearer_token", authToken);
+       }
+     }
    }
 });
 
@@ -23,18 +26,25 @@ export function useSession(): SessionData {
    const [isPending, setIsPending] = useState(true);
    const [error, setError] = useState<any>(null);
 
-   const refetch = () => {
-      setIsPending(true);
-      setError(null);
-      fetchSession();
-   };
-
    const fetchSession = async () => {
       try {
-         // Include bearer token in session check
-         const res = await authClient.getSession();
-         setSession(res.data);
-         setError(null);
+         setIsPending(true);
+         const token = typeof window !== 'undefined' ? localStorage.getItem("bearer_token") : null;
+         
+         const res = await authClient.getSession({
+            fetchOptions: {
+               headers: token ? {
+                  Authorization: `Bearer ${token}`,
+               } : {}
+            },
+         });
+         
+         if (res.data?.user) {
+            setSession(res.data);
+            setError(null);
+         } else {
+            setSession(null);
+         }
       } catch (err) {
          console.error("Session fetch error:", err);
          setSession(null);
@@ -44,19 +54,33 @@ export function useSession(): SessionData {
       }
    };
 
+   const refetch = () => {
+      fetchSession();
+   };
+
    useEffect(() => {
       fetchSession();
 
       // Listen for storage changes to handle login/logout from other tabs
-      const handleStorageChange = (event) => {
+      const handleStorageChange = (event: StorageEvent) => {
          if (event.key === "bearer_token") {
             fetchSession();
          }
       };
 
+      // Listen for focus to refresh session
+      const handleFocus = () => {
+         fetchSession();
+      };
+
       if (typeof window !== 'undefined') {
          window.addEventListener('storage', handleStorageChange);
-         return () => window.removeEventListener('storage', handleStorageChange);
+         window.addEventListener('focus', handleFocus);
+         
+         return () => {
+            window.removeEventListener('storage', handleStorageChange);
+            window.removeEventListener('focus', handleFocus);
+         };
       }
    }, []);
 

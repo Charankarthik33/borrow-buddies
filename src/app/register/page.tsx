@@ -1,9 +1,9 @@
-import { AuthSection } from "@/components/AuthSection";
+import { RegisterForm } from "@/components/auth/RegisterForm";
 
 export default function RegisterPage() {
   return (
     <div className="min-h-screen">
-      <AuthSection />
+      <RegisterForm />
     </div>
   );
 }

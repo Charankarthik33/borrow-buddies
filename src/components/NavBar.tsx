@@ -38,6 +38,7 @@ interface NavigationBarProps {
 
 const navigationItems = [
   { id: "home", label: "Home", icon: Home, requiresAuth: false },
+  { id: "social", label: "Social", icon: Users, requiresAuth: false },
   { id: "search", label: "Search", icon: Search, requiresAuth: false },
   { id: "messages", label: "Messages", icon: MessageSquare, requiresAuth: true },
   { id: "bookings", label: "Bookings", icon: Calendar, requiresAuth: true },

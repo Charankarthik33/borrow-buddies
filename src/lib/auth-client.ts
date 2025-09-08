@@ -1,115 +1,60 @@
+
 "use client"
-import { useEffect, useState, useCallback } from "react"
+import { createAuthClient } from "better-auth/react"
+import { useEffect, useState } from "react"
 
-// Custom auth client that works with our working auth endpoints
-export const authClient = {
-  async signUp(data: { name: string; email: string; password: string }) {
-    const response = await fetch('/api/auth-working/register', {
-      method: 'POST',
+export const authClient = createAuthClient({
+   baseURL: typeof window !== 'undefined' ? window.location.origin : process.env.NEXT_PUBLIC_SITE_URL,
+  fetchOptions: {
       headers: {
-        'Content-Type': 'application/json',
+        Authorization: `Bearer ${typeof window !== 'undefined' ? localStorage.getItem("bearer_token") : ""}`,
       },
-      body: JSON.stringify(data),
-    });
-
-    const result = await response.json();
-    
-    if (!response.ok) {
-      return { data: null, error: { code: result.code || 'SIGNUP_FAILED', message: result.error } };
-    }
-
-    return { data: result, error: null };
-  },
-
-  async signIn(data: { email: string; password: string }) {
-    const response = await fetch('/api/auth-working/login', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(data),
-      credentials: 'include',
-    });
-
-    const result = await response.json();
-    
-    if (!response.ok) {
-      return { data: null, error: { code: result.code || 'SIGNIN_FAILED', message: result.error } };
-    }
-
-    return { data: result, error: null };
-  },
-
-  async signOut() {
-    const response = await fetch('/api/auth-working/session', {
-      method: 'DELETE',
-      credentials: 'include',
-    });
-
-    const result = await response.json();
-    
-    if (!response.ok) {
-      return { data: null, error: { code: result.code || 'SIGNOUT_FAILED', message: result.error } };
-    }
-
-    return { data: result, error: null };
-  },
-
-  async getSession() {
-    const response = await fetch('/api/auth-working/session', {
-      method: 'GET',
-      credentials: 'include',
-    });
-
-    if (!response.ok) {
-      return { data: null, error: { code: 'SESSION_FETCH_FAILED', message: 'Failed to fetch session' } };
-    }
-
-    const result = await response.json();
-    return { data: result, error: null };
+      onSuccess: (ctx) => {
+          const authToken = ctx.response.headers.get("set-auth-token")
+          // Store the token securely (e.g., in localStorage)
+          if(authToken){
+            localStorage.setItem("bearer_token", authToken);
+          }
+      }
   }
-};
+});
 
-// Custom useSession hook
-export function useSession() {
-  const [session, setSession] = useState<any>(null);
-  const [isPending, setIsPending] = useState(true);
-  const [error, setError] = useState<any>(null);
+type SessionData = ReturnType<typeof authClient.useSession>
 
-  const fetchSession = useCallback(async () => {
-    try {
+export function useSession(): SessionData {
+   const [session, setSession] = useState<any>(null);
+   const [isPending, setIsPending] = useState(true);
+   const [error, setError] = useState<any>(null);
+
+   const refetch = () => {
       setIsPending(true);
       setError(null);
-      
-      const { data, error } = await authClient.getSession();
-      
-      if (error) {
-        setSession(null);
-        setError(error);
-      } else {
-        setSession(data);
-        setError(null);
+      fetchSession();
+   };
+
+   const fetchSession = async () => {
+      try {
+         const res = await authClient.getSession({
+            fetchOptions: {
+               auth: {
+                  type: "Bearer",
+                  token: typeof window !== 'undefined' ? localStorage.getItem("bearer_token") || "" : "",
+               },
+            },
+         });
+         setSession(res.data);
+         setError(null);
+      } catch (err) {
+         setSession(null);
+         setError(err);
+      } finally {
+         setIsPending(false);
       }
-    } catch (err) {
-      setSession(null);
-      setError({ code: 'FETCH_ERROR', message: 'Failed to fetch session' });
-    } finally {
-      setIsPending(false);
-    }
-  }, []);
+   };
 
-  const refetch = useCallback(() => {
-    fetchSession();
-  }, [fetchSession]);
+   useEffect(() => {
+      fetchSession();
+   }, []);
 
-  useEffect(() => {
-    fetchSession();
-  }, [fetchSession]);
-
-  return { 
-    data: session, 
-    isPending, 
-    error, 
-    refetch 
-  };
+   return { data: session, isPending, error, refetch };
 }

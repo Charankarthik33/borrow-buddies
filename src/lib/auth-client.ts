@@ -1,115 +1,52 @@
-"use client"
-import { useEffect, useState, useCallback } from "react"
+"use client";
 
-// Custom auth client that works with our working auth endpoints
-export const authClient = {
-  async signUp(data: { name: string; email: string; password: string }) {
-    const response = await fetch('/api/auth-working/register', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(data),
-    });
+import { useEffect, useState } from "react";
 
-    const result = await response.json();
-    
-    if (!response.ok) {
-      return { data: null, error: { code: result.code || 'SIGNUP_FAILED', message: result.error } };
-    }
+export type SessionUser = {
+  id: string;
+  name?: string;
+  email?: string;
+  image?: string;
+} | null;
 
-    return { data: result, error: null };
-  },
+export type Session = { user: NonNullable<SessionUser> } | null;
 
-  async signIn(data: { email: string; password: string }) {
-    const response = await fetch('/api/auth-working/login', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(data),
-      credentials: 'include',
-    });
-
-    const result = await response.json();
-    
-    if (!response.ok) {
-      return { data: null, error: { code: result.code || 'SIGNIN_FAILED', message: result.error } };
-    }
-
-    return { data: result, error: null };
-  },
-
-  async signOut() {
-    const response = await fetch('/api/auth-working/session', {
-      method: 'DELETE',
-      credentials: 'include',
-    });
-
-    const result = await response.json();
-    
-    if (!response.ok) {
-      return { data: null, error: { code: result.code || 'SIGNOUT_FAILED', message: result.error } };
-    }
-
-    return { data: result, error: null };
-  },
-
-  async getSession() {
-    const response = await fetch('/api/auth-working/session', {
-      method: 'GET',
-      credentials: 'include',
-    });
-
-    if (!response.ok) {
-      return { data: null, error: { code: 'SESSION_FETCH_FAILED', message: 'Failed to fetch session' } };
-    }
-
-    const result = await response.json();
-    return { data: result, error: null };
-  }
-};
-
-// Custom useSession hook
 export function useSession() {
-  const [session, setSession] = useState<any>(null);
-  const [isPending, setIsPending] = useState(true);
-  const [error, setError] = useState<any>(null);
+  const [data, setData] = useState<Session>(null);
+  const [isPending, setIsPending] = useState<boolean>(false);
 
-  const fetchSession = useCallback(async () => {
+  const refetch = async () => {
+    setIsPending(true);
     try {
-      setIsPending(true);
-      setError(null);
-      
-      const { data, error } = await authClient.getSession();
-      
-      if (error) {
-        setSession(null);
-        setError(error);
+      const res = await fetch("/api/auth-working/session", { credentials: "include" });
+      if (res.ok) {
+        const json = await res.json();
+        setData(json?.user ? { user: json.user } : null);
       } else {
-        setSession(data);
-        setError(null);
+        setData(null);
       }
-    } catch (err) {
-      setSession(null);
-      setError({ code: 'FETCH_ERROR', message: 'Failed to fetch session' });
+    } catch {
+      setData(null);
     } finally {
       setIsPending(false);
     }
-  }, []);
-
-  const refetch = useCallback(() => {
-    fetchSession();
-  }, [fetchSession]);
+  };
 
   useEffect(() => {
-    fetchSession();
-  }, [fetchSession]);
+    void refetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  return { 
-    data: session, 
-    isPending, 
-    error, 
-    refetch 
-  };
+  return { data, isPending, refetch } as const;
 }
+
+export const authClient = {
+  async signOut(): Promise<{ error: { code: string; message?: string } | null }> {
+    try {
+      await fetch("/api/auth-working/session", { method: "DELETE", credentials: "include" });
+      return { error: null };
+    } catch (e: any) {
+      return { error: { code: "SIGN_OUT_FAILED", message: e?.message || "Failed" } };
+    }
+  },
+};

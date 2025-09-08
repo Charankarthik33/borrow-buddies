@@ -1,4 +1,4 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 export interface User {
   id: string;
@@ -23,7 +23,7 @@ export async function getCurrentUser(request: NextRequest): Promise<User | null>
     // For demo purposes, return mock user if token is provided
     return {
       id: 'user_01h4kxt2e8z9y3b1n7m6q5w8r4',
-      name: 'Demo User', 
+      name: 'Demo User',
       email: 'demo@example.com'
     };
   } catch (error) {

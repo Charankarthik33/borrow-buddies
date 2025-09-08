@@ -92,102 +92,6 @@ const CATEGORIES = [
   "Business Mentoring"
 ];
 
-const MOCK_SERVICES: Service[] = [
-  {
-    id: "1",
-    title: "Personal Fitness Training Session",
-    description: "Get in shape with personalized workout routines and nutrition guidance from a certified trainer.",
-    images: ["/api/placeholder/400/300", "/api/placeholder/400/301"],
-    price: 75,
-    priceUnit: "hour",
-    category: "Fitness & Wellness",
-    location: "San Francisco, CA",
-    distance: 2.3,
-    rating: 4.9,
-    reviewCount: 127,
-    host: {
-      id: "host1",
-      name: "Sarah Johnson",
-      avatar: "/api/placeholder/40/40",
-      rating: 4.9
-    },
-    isAvailable: true,
-    isFavorite: false,
-    availableDates: [new Date(2024, 11, 20), new Date(2024, 11, 21), new Date(2024, 11, 22)]
-  },
-  {
-    id: "2",
-    title: "Professional Photography Mentorship",
-    description: "Learn advanced photography techniques and business skills from a professional photographer.",
-    images: ["/api/placeholder/400/302", "/api/placeholder/400/303"],
-    price: 120,
-    priceUnit: "session",
-    category: "Creative Arts",
-    location: "Los Angeles, CA",
-    distance: 5.7,
-    rating: 4.8,
-    reviewCount: 89,
-    host: {
-      id: "host2",
-      name: "Michael Chen",
-      avatar: "/api/placeholder/40/41",
-      rating: 4.8
-    },
-    isAvailable: true,
-    isFavorite: true,
-    availableDates: [new Date(2024, 11, 23), new Date(2024, 11, 25)]
-  },
-  {
-    id: "3",
-    title: "Italian Cooking Masterclass",
-    description: "Master authentic Italian cuisine with traditional recipes passed down through generations.",
-    images: ["/api/placeholder/400/304"],
-    price: 200,
-    priceUnit: "day",
-    category: "Cooking & Culinary",
-    location: "New York, NY",
-    distance: 12.1,
-    rating: 4.7,
-    reviewCount: 203,
-    host: {
-      id: "host3",
-      name: "Giuseppe Romano",
-      avatar: "/api/placeholder/40/42",
-      rating: 4.7
-    },
-    isAvailable: false,
-    isFavorite: false,
-    availableDates: []
-  }
-];
-
-const MOCK_BOOKINGS: Booking[] = [
-  {
-    id: "booking1",
-    serviceId: "1",
-    serviceName: "Personal Fitness Training Session",
-    serviceImage: "/api/placeholder/60/60",
-    hostName: "Sarah Johnson",
-    date: new Date(2024, 11, 15),
-    duration: 2,
-    totalPrice: 150,
-    status: "confirmed",
-    createdAt: new Date(2024, 11, 10)
-  },
-  {
-    id: "booking2",
-    serviceId: "2",
-    serviceName: "Photography Mentorship",
-    serviceImage: "/api/placeholder/60/61",
-    hostName: "Michael Chen",
-    date: new Date(2024, 11, 18),
-    duration: 1,
-    totalPrice: 120,
-    status: "pending",
-    createdAt: new Date(2024, 11, 12)
-  }
-];
-
 export const ListingsAndBooking = () => {
   const { data: session, isPending } = useSession();
   const [services, setServices] = useState<Service[]>([]);
@@ -211,18 +115,86 @@ export const ListingsAndBooking = () => {
     sortBy: "rating"
   });
 
-  // Simulate loading data
+  // Create Service form state
+  const [createOpen, setCreateOpen] = useState(false);
+  const [form, setForm] = useState({
+    title: "",
+    description: "",
+    category: "",
+    price: "",
+    priceUnit: "hour" as "hour" | "day" | "session",
+    location: "",
+    images: ""
+  });
+
+  const authHeaders = () => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('bearer_token') : null;
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
+  // Load from API
   useEffect(() => {
-    const loadData = async () => {
-      setLoading(true);
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      setServices(MOCK_SERVICES);
-      setBookings(MOCK_BOOKINGS);
-      setLoading(false);
+    const load = async () => {
+      try {
+        setLoading(true);
+        // Services (public)
+        const svcRes = await fetch(`/api/services`);
+        const svcJson = await svcRes.json();
+        const normalizedServices: Service[] = (Array.isArray(svcJson) ? svcJson : []).map((s: any) => {
+          const images = typeof s.images === 'string' ? JSON.parse(s.images || '[]') : (s.images || []);
+          const availableDatesRaw = typeof s.availableDates === 'string' ? JSON.parse(s.availableDates || '[]') : (s.availableDates || []);
+          const availableDates: Date[] = (availableDatesRaw || []).map((d: string) => new Date(d));
+          return {
+            id: String(s.id),
+            title: s.title,
+            description: s.description,
+            images,
+            price: s.price,
+            priceUnit: s.priceUnit || 'hour',
+            category: s.category || 'General',
+            location: s.location || '—',
+            distance: undefined,
+            rating: s.owner?.rating ?? 0,
+            reviewCount: 0,
+            host: { id: s.owner?.id || '', name: s.owner?.name || 'Host', avatar: images?.[0] || '/placeholder.svg', rating: s.owner?.rating ?? 0 },
+            isAvailable: Boolean(s.isAvailable),
+            isFavorite: false,
+            availableDates,
+          } as Service;
+        });
+        setServices(normalizedServices);
+
+        // Bookings (auth)
+        if (session?.user) {
+          const bRes = await fetch(`/api/bookings`, { headers: { 'Content-Type': 'application/json', ...authHeaders() } });
+          if (bRes.ok) {
+            const bJson = await bRes.json();
+            const normalizedBookings: Booking[] = (Array.isArray(bJson) ? bJson : []).map((b: any) => ({
+              id: String(b.id),
+              serviceId: String(b.serviceId),
+              serviceName: b.service?.title || 'Service',
+              serviceImage: (typeof b.service?.images === 'string' ? (JSON.parse(b.service.images)[0] || '/placeholder.svg') : '/placeholder.svg'),
+              hostName: b.service?.owner?.name || 'Host',
+              date: new Date(b.date),
+              duration: b.durationHours,
+              totalPrice: b.totalPrice,
+              status: b.status,
+              createdAt: new Date(b.createdAt)
+            }));
+            setBookings(normalizedBookings);
+          }
+        } else {
+          setBookings([]);
+        }
+      } catch (e) {
+        console.error(e);
+        toast.error('Failed to load listings.');
+      } finally {
+        setLoading(false);
+      }
     };
-    loadData();
-  }, []);
+    load();
+  }, [session]);
 
   // Filter and sort services
   const filteredServices = useCallback(() => {
@@ -230,7 +202,6 @@ export const ListingsAndBooking = () => {
       const matchesSearch = service.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
                            service.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
                            service.host.name.toLowerCase().includes(searchQuery.toLowerCase());
-      
       const matchesLocation = !filters.location || service.location.toLowerCase().includes(filters.location.toLowerCase());
       const matchesCategory = filters.category === "All Categories" || service.category === filters.category;
       const matchesPrice = service.price >= filters.minPrice && service.price <= filters.maxPrice;
@@ -238,11 +209,8 @@ export const ListingsAndBooking = () => {
       const matchesAvailability = filters.availability === "all" || 
                                  (filters.availability === "available" && service.isAvailable) ||
                                  (filters.availability === "unavailable" && !service.isAvailable);
-
       return matchesSearch && matchesLocation && matchesCategory && matchesPrice && matchesRating && matchesAvailability;
     });
-
-    // Sort services
     filtered.sort((a, b) => {
       switch (filters.sortBy) {
         case "price":
@@ -252,28 +220,26 @@ export const ListingsAndBooking = () => {
         case "distance":
           return (a.distance || 0) - (b.distance || 0);
         case "newest":
-          return 0; // Would sort by creation date in real app
+          return 0;
         default:
           return 0;
       }
     });
-
     return filtered;
   }, [services, searchQuery, filters]);
 
-  const toggleFavorite = useCallback((serviceId: string) => {
+  const toggleFavorite = useCallback(async (serviceId: string) => {
     if (!session?.user) {
       toast.error("Please sign in to save favorites");
       return;
     }
-    
-    setServices(prev => prev.map(service => 
-      service.id === serviceId 
-        ? { ...service, isFavorite: !service.isFavorite }
-        : service
-    ));
-    
-    toast.success("Updated favorites");
+    try {
+      const res = await fetch(`/api/services/${serviceId}/favorite`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() } });
+      if (!res.ok) throw new Error('Favorite toggle failed');
+      setServices(prev => prev.map(s => s.id === serviceId ? { ...s, isFavorite: !s.isFavorite } : s));
+    } catch {
+      toast.error('Could not update favorite');
+    }
   }, [session]);
 
   const handleBooking = useCallback(async (service: Service, date: Date) => {
@@ -281,30 +247,105 @@ export const ListingsAndBooking = () => {
       toast.error("Please sign in to make a booking");
       return;
     }
-
     if (!date) {
       toast.error("Please select a date");
       return;
     }
-
-    const newBooking: Booking = {
-      id: `booking-${Date.now()}`,
-      serviceId: service.id,
-      serviceName: service.title,
-      serviceImage: service.images[0],
-      hostName: service.host.name,
-      date,
-      duration: 1,
-      totalPrice: service.price,
-      status: "pending",
-      createdAt: new Date()
-    };
-
-    setBookings(prev => [...prev, newBooking]);
-    setSelectedService(null);
-    setBookingDate(undefined);
-    toast.success("Booking request sent!");
+    try {
+      const yyyy = date.getFullYear();
+      const mm = String(date.getMonth() + 1).padStart(2, '0');
+      const dd = String(date.getDate()).padStart(2, '0');
+      const payload = { serviceId: Number(service.id), date: `${yyyy}-${mm}-${dd}`, durationHours: 1 };
+      const res = await fetch(`/api/bookings`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify(payload) });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || 'Booking failed');
+      }
+      toast.success('Booking request sent!');
+      setSelectedService(null);
+      setBookingDate(undefined);
+      // refresh bookings
+      const bRes = await fetch(`/api/bookings`, { headers: { 'Content-Type': 'application/json', ...authHeaders() } });
+      if (bRes.ok) {
+        const bJson = await bRes.json();
+        const normalizedBookings: Booking[] = (Array.isArray(bJson) ? bJson : []).map((b: any) => ({
+          id: String(b.id),
+          serviceId: String(b.serviceId),
+          serviceName: b.service?.title || 'Service',
+          serviceImage: '/placeholder.svg',
+          hostName: b.service?.owner?.name || 'Host',
+          date: new Date(b.date),
+          duration: b.durationHours,
+          totalPrice: b.totalPrice,
+          status: b.status,
+          createdAt: new Date(b.createdAt)
+        }));
+        setBookings(normalizedBookings);
+      }
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to create booking');
+    }
   }, [session]);
+
+  const submitService = async () => {
+    if (!session?.user) { toast.error("Please sign in to post a service"); return; }
+    if (!form.title.trim() || !form.description.trim() || !form.price) {
+      toast.error("Title, description, and price are required");
+      return;
+    }
+    try {
+      const payload = {
+        title: form.title.trim(),
+        description: form.description.trim(),
+        category: form.category.trim() || null,
+        price: Number(form.price),
+        priceUnit: form.priceUnit,
+        location: form.location.trim() || null,
+        images: form.images
+          ? form.images.split(',').map(s => s.trim()).filter(Boolean)
+          : [],
+        availableDates: []
+      };
+      const res = await fetch('/api/services', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Failed to create service');
+      toast.success('Service posted');
+      setCreateOpen(false);
+      setForm({ title: "", description: "", category: "", price: "", priceUnit: "hour", location: "", images: "" });
+      // refresh services
+      const svcRes = await fetch(`/api/services`);
+      const svcJson = await svcRes.json();
+      const normalizedServices: Service[] = (Array.isArray(svcJson) ? svcJson : []).map((s: any) => {
+        const images = typeof s.images === 'string' ? JSON.parse(s.images || '[]') : (s.images || []);
+        const availableDatesRaw = typeof s.availableDates === 'string' ? JSON.parse(s.availableDates || '[]') : (s.availableDates || []);
+        const availableDates: Date[] = (availableDatesRaw || []).map((d: string) => new Date(d));
+        return {
+          id: String(s.id),
+          title: s.title,
+          description: s.description,
+          images,
+          price: s.price,
+          priceUnit: s.priceUnit || 'hour',
+          category: s.category || 'General',
+          location: s.location || '—',
+          distance: undefined,
+          rating: s.owner?.rating ?? 0,
+          reviewCount: 0,
+          host: { id: s.owner?.id || '', name: s.owner?.name || 'Host', avatar: images?.[0] || '/placeholder.svg', rating: s.owner?.rating ?? 0 },
+          isAvailable: Boolean(s.isAvailable),
+          isFavorite: false,
+          availableDates,
+        } as Service;
+      });
+      setServices(normalizedServices);
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to post service');
+    }
+  };
 
   const getBookingStatusIcon = (status: Booking["status"]) => {
     switch (status) {
@@ -370,12 +411,72 @@ export const ListingsAndBooking = () => {
           <p className="text-muted-foreground">Find and book unique life experiences from talented hosts</p>
         </div>
         
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full lg:w-auto">
-          <TabsList>
-            <TabsTrigger value="listings">Browse Services</TabsTrigger>
-            <TabsTrigger value="bookings">My Bookings</TabsTrigger>
-          </TabsList>
-        </Tabs>
+        <div className="flex items-center gap-2 w-full lg:w-auto">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 lg:flex-none">
+            <TabsList>
+              <TabsTrigger value="listings">Browse Services</TabsTrigger>
+              <TabsTrigger value="bookings">My Bookings</TabsTrigger>
+            </TabsList>
+          </Tabs>
+
+          {/* Post Service */}
+          {session?.user && (
+            <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+              <DialogTrigger asChild>
+                <Button className="whitespace-nowrap">Post a Service</Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>Create Service</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-sm font-medium">Title*</label>
+                    <Input value={form.title} onChange={(e) => setForm(f => ({...f, title: e.target.value}))} placeholder="e.g. Wedding Photography" />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">Description*</label>
+                    <Input value={form.description} onChange={(e) => setForm(f => ({...f, description: e.target.value}))} placeholder="Describe your service" />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-sm font-medium">Category</label>
+                      <Input value={form.category} onChange={(e) => setForm(f => ({...f, category: e.target.value}))} placeholder="e.g. Photography" />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium">Location</label>
+                      <Input value={form.location} onChange={(e) => setForm(f => ({...f, location: e.target.value}))} placeholder="City, State" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-sm font-medium">Price*</label>
+                      <Input type="number" value={form.price} onChange={(e) => setForm(f => ({...f, price: e.target.value}))} placeholder="e.g. 150" />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium">Price Unit</label>
+                      <Select value={form.priceUnit} onValueChange={(v: any) => setForm(f => ({...f, priceUnit: v}))}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="hour">Hour</SelectItem>
+                          <SelectItem value="day">Day</SelectItem>
+                          <SelectItem value="session">Session</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">Images (comma separated URLs)</label>
+                    <Input value={form.images} onChange={(e) => setForm(f => ({...f, images: e.target.value}))} placeholder="https://... , https://..." />
+                  </div>
+                  <Button className="w-full" onClick={submitService}>Create</Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+          )}
+        </div>
       </div>
 
       <TabsContent value="listings" className="space-y-6">
@@ -591,7 +692,12 @@ export const ListingsAndBooking = () => {
                               mode="single"
                               selected={bookingDate}
                               onSelect={setBookingDate}
-                              disabled={(date) => date < new Date() || !selectedService?.availableDates.some(d => d.toDateString() === date.toDateString())}
+                              disabled={(date) => {
+                                if (!selectedService?.availableDates?.length) return date < new Date();
+                                const svcDates = selectedService.availableDates.map(d => new Date(d.getFullYear(), d.getMonth(), d.getDate()).toDateString());
+                                const day = new Date(date.getFullYear(), date.getMonth(), date.getDate()).toDateString();
+                                return date < new Date() || !svcDates.includes(day);
+                              }}
                               className="w-full"
                             />
                           </div>

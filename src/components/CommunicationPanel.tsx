@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useSession } from "@/lib/auth-client";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -21,31 +21,27 @@ import {
   Circle
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 interface Contact {
   id: string;
   name: string;
-  avatar: string;
-  lastMessage: string;
-  timestamp: string;
-  unreadCount: number;
-  isOnline: boolean;
-  isTyping: boolean;
+  avatar: string | null;
+  email?: string;
 }
 
 interface Message {
-  id: string;
+  id: string | number;
   senderId: string;
   content: string;
-  timestamp: string;
-  isRead: boolean;
-  status: 'sending' | 'sent' | 'delivered' | 'read';
+  createdAt: string;
+  status?: 'sent' | 'delivered' | 'read';
 }
 
 interface Conversation {
-  id: string;
-  messages: Message[];
-  participant: Contact;
+  id: number;
+  participants: Array<{ userId: string; name: string; email?: string; image?: string | null }>;
+  lastMessage: { id: number; content: string; senderId: string; createdAt: string } | null;
 }
 
 export const CommunicationPanel = () => {
@@ -55,129 +51,169 @@ export const CommunicationPanel = () => {
   const [messageInput, setMessageInput] = useState("");
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
+  const [searchResults, setSearchResults] = useState<Contact[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Mock data initialization
-  useEffect(() => {
-    const mockContacts: Contact[] = [
-      {
-        id: "1",
-        name: "Sarah Johnson",
-        avatar: "/api/placeholder/40/40",
-        lastMessage: "Hey! Are you still available for the weekend?",
-        timestamp: "2 min ago",
-        unreadCount: 2,
-        isOnline: true,
-        isTyping: false
-      },
-      {
-        id: "2",
-        name: "Mike Chen",
-        avatar: "/api/placeholder/40/40",
-        lastMessage: "Thanks for the great experience!",
-        timestamp: "1 hour ago",
-        unreadCount: 0,
-        isOnline: false,
-        isTyping: false
-      },
-      {
-        id: "3",
-        name: "Emma Davis",
-        avatar: "/api/placeholder/40/40",
-        lastMessage: "Can we reschedule for tomorrow?",
-        timestamp: "3 hours ago",
-        unreadCount: 1,
-        isOnline: true,
-        isTyping: true
-      },
-      {
-        id: "4",
-        name: "Alex Rodriguez",
-        avatar: "/api/placeholder/40/40",
-        lastMessage: "Perfect! See you at 3 PM",
-        timestamp: "Yesterday",
-        unreadCount: 0,
-        isOnline: false,
-        isTyping: false
-      },
-      {
-        id: "5",
-        name: "Lisa Wang",
-        avatar: "/api/placeholder/40/40",
-        lastMessage: "The photos look amazing!",
-        timestamp: "2 days ago",
-        unreadCount: 0,
-        isOnline: true,
-        isTyping: false
-      }
-    ];
-
-    const mockConversations: Conversation[] = mockContacts.map(contact => ({
-      id: contact.id,
-      participant: contact,
-      messages: [
-        {
-          id: `${contact.id}-1`,
-          senderId: contact.id,
-          content: contact.lastMessage,
-          timestamp: contact.timestamp,
-          isRead: contact.unreadCount === 0,
-          status: 'delivered'
-        }
-      ]
-    }));
-
-    setContacts(mockContacts);
-    setConversations(mockConversations);
-    setSelectedContact(mockContacts[0]);
+  const authHeaders = useCallback(() => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('bearer_token') : null;
+    return token ? { Authorization: `Bearer ${token}` } : {};
   }, []);
 
-  // Auto-scroll to bottom of messages
+  // Load contacts and conversations
+  useEffect(() => {
+    const load = async () => {
+      if (!session?.user) return;
+      try {
+        const [cRes, convRes] = await Promise.all([
+          fetch('/api/contacts', { headers: { 'Content-Type': 'application/json', ...authHeaders() } }),
+          fetch('/api/conversations', { headers: { 'Content-Type': 'application/json', ...authHeaders() } })
+        ]);
+        if (cRes.ok) {
+          const cJson = await cRes.json();
+          const normalized: Contact[] = (Array.isArray(cJson) ? cJson : []).map((c: any) => ({
+            id: c.contactUser.id,
+            name: c.contactUser.name || 'User',
+            email: c.contactUser.email,
+            avatar: c.contactUser.image || null
+          }));
+          setContacts(normalized);
+        }
+        if (convRes.ok) {
+          const convJson = await convRes.json();
+          setConversations(convJson || []);
+        }
+      } catch (e) {
+        console.error(e);
+        toast.error('Failed to load messages');
+      }
+    };
+    load();
+  }, [session, authHeaders]);
+
+  // Load messages for a conversation
+  const loadMessages = useCallback(async (conversationId: number) => {
+    try {
+      const res = await fetch(`/api/conversations/${conversationId}/messages`, { headers: { 'Content-Type': 'application/json', ...authHeaders() } });
+      if (res.ok) {
+        const data = await res.json();
+        const normalized: Message[] = (Array.isArray(data) ? data : []).map((m: any) => ({
+          id: m.id,
+          senderId: m.senderId,
+          content: m.content,
+          createdAt: m.createdAt,
+          status: m.status
+        }));
+        setMessages(normalized);
+      }
+    } catch (e) {
+      console.error(e);
+      toast.error('Failed to load conversation');
+    }
+  }, [authHeaders]);
+
+  // Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [conversations, selectedContact]);
+  }, [messages, selectedContact]);
 
-  // Filter contacts based on search
+  // Filter contacts by search
   const filteredContacts = contacts.filter(contact =>
     contact.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const sendMessage = () => {
-    if (!messageInput.trim() || !selectedContact || !session?.user) return;
-
-    const newMessage: Message = {
-      id: `${Date.now()}`,
-      senderId: session.user.id,
-      content: messageInput,
-      timestamp: "now",
-      isRead: false,
-      status: 'sending'
-    };
-
-    setConversations(prev => prev.map(conv => 
-      conv.id === selectedContact.id 
-        ? { ...conv, messages: [...conv.messages, newMessage] }
-        : conv
-    ));
-
-    setMessageInput("");
-
-    // Simulate message status updates
-    setTimeout(() => {
-      setConversations(prev => prev.map(conv => 
-        conv.id === selectedContact.id 
-          ? { 
-            ...conv, 
-            messages: conv.messages.map(msg => 
-              msg.id === newMessage.id ? { ...msg, status: 'sent' } : msg
-            )
-          }
-          : conv
-      ));
-    }, 500);
+  const selectContact = async (contact: Contact) => {
+    setSelectedContact(contact);
+    // find or create conversation
+    let conversationId = conversations.find(c => c.participants.some(p => p.userId === contact.id))?.id || null;
+    if (!conversationId) {
+      try {
+        const res = await fetch('/api/conversations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({ userId: contact.id })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error || 'Failed to start conversation');
+        conversationId = data.id;
+        setConversations(prev => [{...data}, ...prev]);
+      } catch (e: any) {
+        toast.error(e.message || 'Could not open conversation');
+        return;
+      }
+    }
+    setActiveConversationId(conversationId);
+    await loadMessages(conversationId);
   };
 
-  const currentConversation = conversations.find(conv => conv.id === selectedContact?.id);
+  // Send message
+  const sendMessage = async () => {
+    if (!messageInput.trim() || !activeConversationId || !session?.user) return;
+
+    const temp: Message = {
+      id: `temp-${Date.now()}`,
+      senderId: session.user.id,
+      content: messageInput,
+      createdAt: new Date().toISOString(),
+      status: 'sent'
+    };
+    setMessages(prev => [...prev, temp]);
+    setMessageInput("");
+
+    try {
+      const res = await fetch(`/api/conversations/${activeConversationId}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ content: temp.content })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Failed to send');
+      // replace temp with real
+      setMessages(prev => prev.map(m => m.id === temp.id ? {
+        id: data.id,
+        senderId: data.senderId,
+        content: data.content,
+        createdAt: data.createdAt,
+        status: data.status
+      } : m));
+    } catch (e: any) {
+      toast.error(e.message || 'Message failed');
+    }
+  };
+
+  // Search users (global) to add contact
+  const searchUsers = useCallback(async (q: string) => {
+    if (!q.trim()) { setSearchResults([]); return; }
+    try {
+      const res = await fetch(`/api/users/search?query=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        const normalized: Contact[] = data.map((u: any) => ({ id: u.id, name: u.name || u.email || 'User', email: u.email, avatar: u.image }));
+        setSearchResults(normalized);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
+
+  // Add contact
+  const addContact = async (userId: string) => {
+    try {
+      const res = await fetch('/api/contacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ userId })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Failed to add contact');
+      const c: Contact = { id: data.contactUser.id, name: data.contactUser.name || 'User', email: data.contactUser.email, avatar: data.contactUser.image };
+      setContacts(prev => [c, ...prev.filter(p => p.id !== c.id)]);
+      toast.success('Contact added');
+    } catch (e: any) {
+      toast.error(e.message || 'Could not add contact');
+    }
+  };
 
   if (isPending) {
     return (
@@ -200,22 +236,43 @@ export const CommunicationPanel = () => {
     );
   }
 
+  const currentConversation = messages; // already filtered by active conversation
+
   return (
     <Card className="h-[600px] overflow-hidden">
       <div className="flex h-full">
         {/* Sidebar */}
         <div className="w-80 border-r border-border flex flex-col">
           {/* Search Header */}
-          <div className="p-4 border-b border-border">
+          <div className="p-4 border-b border-border space-y-2">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Search conversations..."
+                placeholder="Search conversations or users..."
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  const v = e.target.value; setSearchQuery(v); searchUsers(v);
+                }}
                 className="pl-9"
               />
             </div>
+            {/* Global user search results with add/start */}
+            {searchQuery && searchResults.length > 0 && (
+              <div className="space-y-1">
+                {searchResults.slice(0,5).map(u => (
+                  <div key={u.id} className="flex items-center justify-between text-sm">
+                    <div className="flex items-center gap-2">
+                      <Avatar className="h-6 w-6"><AvatarImage src={u.avatar || undefined} /><AvatarFallback>{u.name?.charAt(0)}</AvatarFallback></Avatar>
+                      <span className="truncate max-w-[140px]">{u.name}</span>
+                    </div>
+                    <div className="flex gap-1">
+                      <Button size="xs" variant="ghost" onClick={() => addContact(u.id)}>Add</Button>
+                      <Button size="xs" onClick={() => selectContact(u)}>Chat</Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Contacts List */}
@@ -223,13 +280,13 @@ export const CommunicationPanel = () => {
             <div className="p-2">
               {filteredContacts.length === 0 ? (
                 <div className="text-center py-8">
-                  <p className="text-muted-foreground">No conversations found</p>
+                  <p className="text-muted-foreground">No conversations yet</p>
                 </div>
               ) : (
                 filteredContacts.map((contact) => (
                   <div
                     key={contact.id}
-                    onClick={() => setSelectedContact(contact)}
+                    onClick={() => selectContact(contact)}
                     className={cn(
                       "flex items-center space-x-3 p-3 rounded-lg cursor-pointer transition-colors hover:bg-accent",
                       selectedContact?.id === contact.id && "bg-accent"
@@ -237,33 +294,16 @@ export const CommunicationPanel = () => {
                   >
                     <div className="relative">
                       <Avatar className="h-12 w-12">
-                        <AvatarImage src={contact.avatar} alt={contact.name} />
+                        <AvatarImage src={contact.avatar || undefined} alt={contact.name} />
                         <AvatarFallback>{contact.name.charAt(0)}</AvatarFallback>
                       </Avatar>
-                      {contact.isOnline && (
-                        <Circle className="absolute -bottom-1 -right-1 h-4 w-4 fill-green-500 text-green-500" />
-                      )}
                     </div>
                     
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between">
                         <h3 className="font-medium truncate">{contact.name}</h3>
-                        <span className="text-xs text-muted-foreground">{contact.timestamp}</span>
                       </div>
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm text-muted-foreground truncate">
-                          {contact.isTyping ? (
-                            <span className="text-primary">Typing...</span>
-                          ) : (
-                            contact.lastMessage
-                          )}
-                        </p>
-                        {contact.unreadCount > 0 && (
-                          <Badge variant="default" className="ml-2 h-5 min-w-5 text-xs">
-                            {contact.unreadCount}
-                          </Badge>
-                        )}
-                      </div>
+                      <p className="text-sm text-muted-foreground truncate">{contact.email}</p>
                     </div>
                   </div>
                 ))
@@ -281,18 +321,13 @@ export const CommunicationPanel = () => {
                 <div className="flex items-center space-x-3">
                   <div className="relative">
                     <Avatar className="h-10 w-10">
-                      <AvatarImage src={selectedContact.avatar} alt={selectedContact.name} />
+                      <AvatarImage src={selectedContact.avatar || undefined} alt={selectedContact.name} />
                       <AvatarFallback>{selectedContact.name.charAt(0)}</AvatarFallback>
                     </Avatar>
-                    {selectedContact.isOnline && (
-                      <Circle className="absolute -bottom-1 -right-1 h-3 w-3 fill-green-500 text-green-500" />
-                    )}
                   </div>
                   <div>
                     <h2 className="font-semibold">{selectedContact.name}</h2>
-                    <p className="text-sm text-muted-foreground">
-                      {selectedContact.isOnline ? "Online" : "Offline"}
-                    </p>
+                    <p className="text-sm text-muted-foreground">Chat</p>
                   </div>
                 </div>
                 
@@ -312,7 +347,7 @@ export const CommunicationPanel = () => {
               {/* Messages */}
               <ScrollArea className="flex-1 p-4">
                 <div className="space-y-4">
-                  {currentConversation?.messages.map((message) => {
+                  {currentConversation.map((message) => {
                     const isSent = message.senderId === session.user?.id;
                     return (
                       <div
@@ -335,12 +370,9 @@ export const CommunicationPanel = () => {
                             "flex items-center justify-end space-x-1 mt-1",
                             isSent ? "text-primary-foreground/70" : "text-muted-foreground"
                           )}>
-                            <span className="text-xs">{message.timestamp}</span>
+                            <span className="text-xs">{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                             {isSent && (
                               <div>
-                                {message.status === 'sending' && (
-                                  <Circle className="h-3 w-3" />
-                                )}
                                 {message.status === 'sent' && (
                                   <Check className="h-3 w-3" />
                                 )}
@@ -357,19 +389,6 @@ export const CommunicationPanel = () => {
                       </div>
                     );
                   })}
-                  
-                  {selectedContact.isTyping && (
-                    <div className="flex justify-start">
-                      <div className="bg-muted px-4 py-2 rounded-lg">
-                        <div className="flex space-x-1">
-                          <Circle className="h-2 w-2 animate-bounce fill-current" />
-                          <Circle className="h-2 w-2 animate-bounce fill-current" style={{animationDelay: '0.1s'}} />
-                          <Circle className="h-2 w-2 animate-bounce fill-current" style={{animationDelay: '0.2s'}} />
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  
                   <div ref={messagesEndRef} />
                 </div>
               </ScrollArea>
@@ -387,7 +406,7 @@ export const CommunicationPanel = () => {
                     placeholder="Type a message..."
                     value={messageInput}
                     onChange={(e) => setMessageInput(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+                    onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
                     className="flex-1"
                   />
                   <Button 

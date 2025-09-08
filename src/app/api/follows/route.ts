@@ -1,260 +1,147 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/db';
-import { follows, users } from '@/db/schema';
-import { eq, and, or, desc } from 'drizzle-orm';
-
-export async function GET(request: NextRequest) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id');
-    const followerId = searchParams.get('followerId');
-    const followingId = searchParams.get('followingId');
-    const limit = Math.min(parseInt(searchParams.get('limit') || '10'), 100);
-    const offset = parseInt(searchParams.get('offset') || '0');
-
-    // Get single follow by ID
-    if (id) {
-      if (!id || isNaN(parseInt(id))) {
-        return NextResponse.json({ 
-          error: "Valid ID is required",
-          code: "INVALID_ID" 
-        }, { status: 400 });
-      }
-
-      const follow = await db.select()
-        .from(follows)
-        .where(eq(follows.id, parseInt(id)))
-        .limit(1);
-
-      if (follow.length === 0) {
-        return NextResponse.json({ error: 'Follow relationship not found' }, { status: 404 });
-      }
-
-      return NextResponse.json(follow[0]);
-    }
-
-    // Build query with filters
-    let query = db.select().from(follows);
-    let conditions = [];
-
-    // Apply filters
-    if (followerId) {
-      const followerIdInt = parseInt(followerId);
-      if (isNaN(followerIdInt)) {
-        return NextResponse.json({ 
-          error: "Valid followerId is required",
-          code: "INVALID_FOLLOWER_ID" 
-        }, { status: 400 });
-      }
-      conditions.push(eq(follows.followerId, followerIdInt));
-    }
-
-    if (followingId) {
-      const followingIdInt = parseInt(followingId);
-      if (isNaN(followingIdInt)) {
-        return NextResponse.json({ 
-          error: "Valid followingId is required",
-          code: "INVALID_FOLLOWING_ID" 
-        }, { status: 400 });
-      }
-      conditions.push(eq(follows.followingId, followingIdInt));
-    }
-
-    if (conditions.length > 0) {
-      query = query.where(and(...conditions));
-    }
-
-    const results = await query
-      .orderBy(desc(follows.createdAt))
-      .limit(limit)
-      .offset(offset);
-
-    return NextResponse.json(results);
-  } catch (error) {
-    console.error('GET error:', error);
-    return NextResponse.json({ 
-      error: 'Internal server error: ' + error 
-    }, { status: 500 });
-  }
-}
+import { follows, user } from '@/db/schema';
+import { eq, and, desc } from 'drizzle-orm';
+import { getCurrentUser } from '@/lib/auth';
 
 export async function POST(request: NextRequest) {
   try {
-    const requestBody = await request.json();
-    const { followerId, followingId } = requestBody;
+    const currentUser = await getCurrentUser(request);
+    if (!currentUser) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+    }
 
-    // Validation
-    if (!followerId) {
+    const body = await request.json();
+    const { targetUserId } = body;
+
+    // SECURITY: Check for forbidden fields
+    if ('followerId' in body || 'followingId' in body) {
       return NextResponse.json({ 
-        error: "followerId is required",
-        code: "MISSING_FOLLOWER_ID" 
+        error: "User ID cannot be provided in request body",
+        code: "USER_ID_NOT_ALLOWED" 
       }, { status: 400 });
     }
 
-    if (!followingId) {
+    // Validate required field
+    if (!targetUserId) {
       return NextResponse.json({ 
-        error: "followingId is required",
-        code: "MISSING_FOLLOWING_ID" 
+        error: "Target user ID is required",
+        code: "MISSING_REQUIRED_FIELD" 
       }, { status: 400 });
     }
 
-    const followerIdInt = parseInt(followerId);
-    const followingIdInt = parseInt(followingId);
-    
-    if (isNaN(followerIdInt) || isNaN(followingIdInt)) {
-      return NextResponse.json({ 
-        error: "Valid follower and following IDs are required",
-        code: "INVALID_IDS" 
-      }, { status: 400 });
-    }
-
-    // Prevent self-following
-    if (followerIdInt === followingIdInt) {
+    // Validate targetUserId is different from current user
+    if (targetUserId === currentUser.id) {
       return NextResponse.json({ 
         error: "Cannot follow yourself",
-        code: "SELF_FOLLOW_NOT_ALLOWED" 
+        code: "INVALID_TARGET_USER" 
       }, { status: 400 });
     }
 
-    // Validate both users exist
-    const followerUser = await db.select()
-      .from(users)
-      .where(eq(users.id, followerIdInt))
+    // Check if target user exists
+    const targetUser = await db.select()
+      .from(user)
+      .where(eq(user.id, targetUserId))
       .limit(1);
 
-    if (followerUser.length === 0) {
+    if (targetUser.length === 0) {
       return NextResponse.json({ 
-        error: "Follower user does not exist",
-        code: "FOLLOWER_NOT_FOUND" 
-      }, { status: 400 });
-    }
-
-    const followingUser = await db.select()
-      .from(users)
-      .where(eq(users.id, followingIdInt))
-      .limit(1);
-
-    if (followingUser.length === 0) {
-      return NextResponse.json({ 
-        error: "User to follow does not exist",
+        error: "Target user not found",
         code: "USER_NOT_FOUND" 
       }, { status: 400 });
     }
 
-    // Check for duplicate follow
+    // Check for existing follow request
     const existingFollow = await db.select()
       .from(follows)
       .where(and(
-        eq(follows.followerId, followerIdInt),
-        eq(follows.followingId, followingIdInt)
+        eq(follows.followerId, currentUser.id),
+        eq(follows.followingId, targetUserId)
       ))
       .limit(1);
 
     if (existingFollow.length > 0) {
       return NextResponse.json({ 
-        error: "Already following this user",
+        error: "Follow request already exists",
         code: "DUPLICATE_FOLLOW" 
-      }, { status: 400 });
+      }, { status: 409 });
     }
 
-    // Create follow relationship
+    // Create follow request
     const newFollow = await db.insert(follows)
       .values({
-        followerId: followerIdInt,
-        followingId: followingIdInt,
+        followerId: currentUser.id,
+        followingId: targetUserId,
+        status: 'pending',
         createdAt: new Date().toISOString()
       })
       .returning();
 
     return NextResponse.json(newFollow[0], { status: 201 });
+
   } catch (error) {
-    console.error('POST error:', error);
+    console.error('POST /api/follows error:', error);
     return NextResponse.json({ 
-      error: 'Internal server error: ' + error 
+      error: 'Internal server error',
+      code: 'INTERNAL_ERROR'
     }, { status: 500 });
   }
 }
 
-export async function DELETE(request: NextRequest) {
+export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id');
-    const followerId = searchParams.get('followerId');
-    const followingId = searchParams.get('followingId');
-
-    // Delete by ID
-    if (id) {
-      if (!id || isNaN(parseInt(id))) {
-        return NextResponse.json({ 
-          error: "Valid ID is required",
-          code: "INVALID_ID" 
-        }, { status: 400 });
-      }
-
-      const existingFollow = await db.select()
-        .from(follows)
-        .where(eq(follows.id, parseInt(id)))
-        .limit(1);
-
-      if (existingFollow.length === 0) {
-        return NextResponse.json({ error: 'Follow relationship not found' }, { status: 404 });
-      }
-
-      const deleted = await db.delete(follows)
-        .where(eq(follows.id, parseInt(id)))
-        .returning();
-
-      return NextResponse.json({ 
-        message: 'Follow relationship deleted successfully',
-        deleted: deleted[0]
-      });
+    const currentUser = await getCurrentUser(request);
+    if (!currentUser) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
     }
 
-    // Delete by follower/following combination
-    if (followerId && followingId) {
-      const followerIdInt = parseInt(followerId);
-      const followingIdInt = parseInt(followingId);
+    const url = new URL(request.url);
+    const isRequests = url.pathname.endsWith('/requests');
 
-      if (isNaN(followerIdInt) || isNaN(followingIdInt)) {
-        return NextResponse.json({ 
-          error: "Valid followerId and followingId are required",
-          code: "INVALID_IDS" 
-        }, { status: 400 });
-      }
-
-      const existingFollow = await db.select()
+    if (isRequests) {
+      // Get incoming pending follow requests for current user
+      const requests = await db.select({
+        id: follows.id,
+        status: follows.status,
+        createdAt: follows.createdAt,
+        followerId: follows.followerId,
+        followerName: user.name,
+        followerEmail: user.email,
+        followerImage: user.image
+      })
         .from(follows)
+        .innerJoin(user, eq(follows.followerId, user.id))
         .where(and(
-          eq(follows.followerId, followerIdInt),
-          eq(follows.followingId, followingIdInt)
+          eq(follows.followingId, currentUser.id),
+          eq(follows.status, 'pending')
         ))
-        .limit(1);
+        .orderBy(desc(follows.createdAt));
 
-      if (existingFollow.length === 0) {
-        return NextResponse.json({ error: 'Follow relationship not found' }, { status: 404 });
-      }
-
-      const deleted = await db.delete(follows)
-        .where(and(
-          eq(follows.followerId, followerIdInt),
-          eq(follows.followingId, followingIdInt)
-        ))
-        .returning();
-
-      return NextResponse.json({ 
-        message: 'Follow relationship deleted successfully',
-        deleted: deleted[0]
-      });
+      return NextResponse.json(requests);
     }
 
-    return NextResponse.json({ 
-      error: "Either id or both followerId and followingId are required",
-      code: "MISSING_PARAMETERS" 
-    }, { status: 400 });
+    // Default: Get all follows initiated by current user
+    const userFollows = await db.select({
+      id: follows.id,
+      status: follows.status,
+      createdAt: follows.createdAt,
+      followingId: follows.followingId,
+      followingName: user.name,
+      followingEmail: user.email,
+      followingImage: user.image
+    })
+      .from(follows)
+      .innerJoin(user, eq(follows.followingId, user.id))
+      .where(eq(follows.followerId, currentUser.id))
+      .orderBy(desc(follows.createdAt));
+
+    return NextResponse.json(userFollows);
+
   } catch (error) {
-    console.error('DELETE error:', error);
+    console.error('GET /api/follows error:', error);
     return NextResponse.json({ 
-      error: 'Internal server error: ' + error 
+      error: 'Internal server error',
+      code: 'INTERNAL_ERROR'
     }, { status: 500 });
   }
 }

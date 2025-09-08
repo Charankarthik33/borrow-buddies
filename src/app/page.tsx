@@ -24,7 +24,6 @@ import {
   User,
   Settings,
   TrendingUp,
-  Users,
   Heart,
   MapPin,
   Star,
@@ -75,8 +74,6 @@ export default function HomePage() {
     switch (activeSection) {
       case 'home':
         return <SocialFeed />;
-      case 'social':
-        return <SocialFeed />;
       case 'search':
         return <ListingsAndBooking />;
       case 'messages':
@@ -96,7 +93,6 @@ export default function HomePage() {
 
   const sidebarItems = [
     { id: 'home', label: 'Home', icon: Home, public: true },
-    { id: 'social', label: 'Social', icon: Users, public: true },
     { id: 'search', label: 'Search', icon: Search, public: true },
     { id: 'messages', label: 'Messages', icon: MessageSquare, protected: true },
     { id: 'bookings', label: 'Bookings', icon: Calendar, protected: true },

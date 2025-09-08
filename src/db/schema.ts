@@ -1,4 +1,4 @@
-import { sqliteTable, integer, text } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, integer, text, real } from 'drizzle-orm/sqlite-core';
 
 
 
@@ -65,4 +65,85 @@ export const verification = sqliteTable("verification", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(
     () => new Date(),
   ),
+});
+
+// Additional profiles and social features
+export const profiles = sqliteTable('profiles', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  userId: text('user_id').references(() => user.id, { onDelete: 'cascade' }).unique().notNull(),
+  location: text('location'),
+  bio: text('bio'),
+  rating: real('rating').default(0),
+  verified: integer('verified', { mode: 'boolean' }).default(false),
+  createdAt: text('created_at').notNull(),
+});
+
+export const follows = sqliteTable('follows', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  followerId: text('follower_id').references(() => user.id, { onDelete: 'cascade' }).notNull(),
+  followingId: text('following_id').references(() => user.id, { onDelete: 'cascade' }).notNull(),
+  status: text('status', { enum: ['pending', 'accepted', 'rejected'] }).default('pending').notNull(),
+  createdAt: text('created_at').notNull(),
+});
+
+export const contacts = sqliteTable('contacts', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  ownerId: text('owner_id').references(() => user.id, { onDelete: 'cascade' }).notNull(),
+  contactUserId: text('contact_user_id').references(() => user.id, { onDelete: 'cascade' }).notNull(),
+  createdAt: text('created_at').notNull(),
+});
+
+export const conversations = sqliteTable('conversations', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  isGroup: integer('is_group', { mode: 'boolean' }).default(false).notNull(),
+  createdAt: text('created_at').notNull(),
+});
+
+export const conversationParticipants = sqliteTable('conversation_participants', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  conversationId: integer('conversation_id').references(() => conversations.id, { onDelete: 'cascade' }).notNull(),
+  userId: text('user_id').references(() => user.id, { onDelete: 'cascade' }).notNull(),
+  lastReadMessageId: integer('last_read_message_id'),
+});
+
+export const messages = sqliteTable('messages', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  conversationId: integer('conversation_id').references(() => conversations.id, { onDelete: 'cascade' }).notNull(),
+  senderId: text('sender_id').references(() => user.id, { onDelete: 'cascade' }).notNull(),
+  content: text('content').notNull(),
+  status: text('status', { enum: ['sent', 'delivered', 'read'] }).default('sent').notNull(),
+  createdAt: text('created_at').notNull(),
+});
+
+export const services = sqliteTable('services', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  ownerId: text('owner_id').references(() => user.id, { onDelete: 'cascade' }).notNull(),
+  title: text('title').notNull(),
+  description: text('description').notNull(),
+  category: text('category'),
+  price: integer('price').notNull(),
+  priceUnit: text('price_unit', { enum: ['hour', 'day', 'session'] }).default('hour').notNull(),
+  location: text('location'),
+  images: text('images', { mode: 'json' }).default('[]'),
+  availableDates: text('available_dates', { mode: 'json' }).default('[]'),
+  isAvailable: integer('is_available', { mode: 'boolean' }).default(true).notNull(),
+  createdAt: text('created_at').notNull(),
+});
+
+export const favorites = sqliteTable('favorites', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  userId: text('user_id').references(() => user.id, { onDelete: 'cascade' }).notNull(),
+  serviceId: integer('service_id').references(() => services.id, { onDelete: 'cascade' }).notNull(),
+  createdAt: text('created_at').notNull(),
+});
+
+export const bookings = sqliteTable('bookings', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  serviceId: integer('service_id').references(() => services.id, { onDelete: 'cascade' }).notNull(),
+  customerId: text('customer_id').references(() => user.id, { onDelete: 'cascade' }).notNull(),
+  date: text('date').notNull(),
+  durationHours: integer('duration_hours').default(1).notNull(),
+  totalPrice: integer('total_price').notNull(),
+  status: text('status', { enum: ['pending', 'confirmed', 'completed', 'cancelled', 'rejected'] }).default('pending').notNull(),
+  createdAt: text('created_at').notNull(),
 });
